@@ -1,13 +1,15 @@
 //! Game Boy / Game Boy Color emulator core.
 //!
-//! Phase 0: this crate only has the public API shape and cartridge header parsing.
-//! No CPU, PPU, APU or timer exists yet, so `GameBoy` returns placeholder values.
+//! Phase 1 in progress: cartridge header, bus, and the SM83 CPU. No PPU, APU or full timer yet.
+//! Methods for components that do not exist yet return placeholder values.
 
 pub mod bus;
 pub mod cartridge;
 pub mod cpu;
 
+pub use bus::Bus;
 pub use cartridge::{Cartridge, CartridgeError};
+pub use cpu::Cpu;
 
 /// Hardware model to emulate (CLAUDE.md §4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +32,8 @@ pub const SCREEN_HEIGHT: usize = 144;
 /// can be written against the final signatures.
 pub struct GameBoy {
     model: Model,
-    cartridge: Cartridge,
+    cpu: Cpu,
+    bus: Bus,
     framebuffer: Vec<u32>,
 }
 
@@ -38,7 +41,8 @@ impl GameBoy {
     pub fn new(cartridge: Cartridge, model: Model) -> GameBoy {
         GameBoy {
             model,
-            cartridge,
+            cpu: Cpu::new(),
+            bus: Bus::new(cartridge),
             framebuffer: vec![0; SCREEN_WIDTH * SCREEN_HEIGHT],
         }
     }
@@ -48,19 +52,27 @@ impl GameBoy {
     }
 
     pub fn cartridge(&self) -> &Cartridge {
-        &self.cartridge
+        self.bus.cartridge()
     }
 
-    /// Execute one CPU instruction. Returns T-cycles elapsed.
-    /// Placeholder: returns 4 (one M-cycle) and does nothing.
+    /// Execute one CPU instruction (or one idle HALT step). Returns T-cycles elapsed.
     pub fn step(&mut self) -> u32 {
-        4
+        self.cpu.step(&mut self.bus)
     }
 
-    /// Program counter. Placeholder: the post-boot value 0x0100 (Pan Docs "Power-Up Sequence"),
-    /// because no CPU runs yet. Phase 1 replaces this with the real register.
+    /// Program counter.
     pub fn pc(&self) -> u16 {
-        0x0100
+        self.cpu.regs.pc
+    }
+
+    /// Read-only view of the CPU, for tracing and tests.
+    pub fn cpu(&self) -> &Cpu {
+        &self.cpu
+    }
+
+    /// Read-only view of the bus. `Bus::peek` reads memory without advancing time.
+    pub fn bus(&self) -> &Bus {
+        &self.bus
     }
 
     /// Run until a frame is complete. Placeholder: no-op.
