@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust with rustfmt and clippy
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace
+
+      # Downloads the pinned, checksum-verified ROM bundle. Offline it exits 0 and the
+      # ROM tests skip; a checksum mismatch exits 1 and fails the job.
+      - name: Fetch test ROMs
+        run: bash scripts/fetch_test_roms.sh
+
+      - name: Test
+        run: cargo test --workspace
