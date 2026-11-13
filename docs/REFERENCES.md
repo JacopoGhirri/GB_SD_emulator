@@ -23,8 +23,18 @@ Verify each URL on first use; repositories move. Prefer sources higher in the li
 | `dmg-acid2` | DMG PPU rendering | Screenshot equals reference image |
 | `cgb-acid2` | CGB PPU rendering | Screenshot equals reference image |
 
-Likely sources (verify): `retrio/gb-test-roms` (Blargg + others), `c-sp/game-boy-test-roms`
-(release bundle of many suites with expected screenshots), `Gekkio/mooneye-test-suite`,
+### Pinned bundle (used by `scripts/fetch_test_roms.sh`)
+- Source: https://github.com/c-sp/game-boy-test-roms, release **v7.0** (published 2024-02-25), licence MIT.
+  Each suite inside keeps its own licence; see the README files in the bundle.
+- Archive `game-boy-test-roms-v7.0.zip`, 3,756,786 bytes,
+  SHA-256 `B9A9D7A1075AA35A3D07C07C34974048672D8520DCA9E07A50178F5860C3832C`
+  (computed by hand on 2026-11-13, since GitHub reports no digest for this asset; the script verifies it).
+- Extracted to `tests/roms/game-boy-test-roms-v7.0/`. Key paths:
+  - Blargg `cpu_instrs`: `blargg/cpu_instrs/cpu_instrs.gb` and `blargg/cpu_instrs/individual/*.gb`
+  - Mooneye acceptance: `mooneye-test-suite/`
+  - `dmg-acid2/`, `cgb-acid2/`
+
+Other sources (not used yet): `retrio/gb-test-roms`, `Gekkio/mooneye-test-suite`,
 `mattcurrie/dmg-acid2`, `mattcurrie/cgb-acid2`.
 
 ## Debug tooling
