@@ -75,7 +75,7 @@ compare FAILED: 21465 pixels differ from ...                                    
 | Blargg cpu_instrs | `blargg/cpu_instrs/cpu_instrs.gb` | not run for correctness: CPU not implemented (phase 1) | 2026-11-13 |
 
 ## Decisions log
-- **Branch:** Phase 0 committed on `master` (the repo's only branch, tracking `origin/master`). The PR base named in the instructions is `main`, which does not exist locally.
+- **Branch:** `master` is the only branch and the target for PRs, per the owner's decision (2026-11-13). Phase 0 is committed on `master`, tracking `origin/master`.
 - **Line endings:** `.gitattributes` forces LF (`* text=auto eol=lf`) and marks ROM/image files as binary. Added first so shell scripts stay LF on Windows checkouts and on the Linux CI runner.
 - **Cargo.lock is committed** (not ignored): the workspace ships binaries.
 - **Dependencies added** (CLAUDE.md §2 requires a one-line justification each):
@@ -95,5 +95,4 @@ compare FAILED: 21465 pixels differ from ...                                    
 - The SKIP path shows a mixed `\` and `/` path on Windows. Cosmetic only.
 
 ## Open questions for the human
-- A commit `cb635f9 "remove co authoring"` by you appears in the history between my commits. It adds three lines to `CLAUDE.md`. I did not touch it. Please confirm it is intended.
-- Should `main` be created as the PR base, or should PRs target `master`?
+- None outstanding. Resolved 2026-11-13: commit `cb635f9` ("remove co authoring", three lines in `CLAUDE.md`) is intended and is left as is; PRs target `master`.
