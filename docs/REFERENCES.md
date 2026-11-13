@@ -40,6 +40,7 @@ Other sources (not used yet): `retrio/gb-test-roms`, `Gekkio/mooneye-test-suite`
 ## Debug tooling
 - **Gameboy Doctor** (`robert/gameboy-doctor`): known-good execution logs for Blargg cpu_instrs ROMs
   and a script that diffs your log against them. Needs LY (0xFF44) to read constant 0x90 in its "doctor mode".
+  Used in phase 1 via `scripts/fetch_doctor_logs.sh` (pinned commit `cc742777af7d71de3061c65733ecfa250237012b`).
 
 ## Reference emulators (study behaviour, do not copy code)
 - SameBoy (very accurate), Gambatte (accurate), mGBA (also GBA, useful for the future project),

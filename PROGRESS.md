@@ -1,12 +1,12 @@
 # PROGRESS
 
-**Current phase:** 1 — CPU (phase 0 gate met on 2026-11-13)
-**Last updated:** 2026-11-13 (phase 1 paused, see "Phase 1 status")
+**Current phase:** 1 — CPU gate met on 2026-11-13 (awaiting owner sign-off before phase 2)
+**Last updated:** 2026-11-13
 
 ## Status by phase
 - [x] 0 Bootstrap
-- [ ] 1 CPU  ← current (paused: tasks 1-2 done; blocked by Smart App Control)
-- [ ] 2 Bus, timer, cartridge  (MUST replace the phase-1 minimal timer and minimal MBC1)
+- [x] 1 CPU  (gate met 2026-11-13, see "Phase 1 — CPU: gate status")
+- [ ] 2 Bus, timer, cartridge  ← next (MUST replace the phase-1 minimal timer and minimal MBC1)
 - [ ] 3 PPU
 - [ ] 4 Frontend, input, saves
 - [ ] 5 Pokémon Red/Blue
@@ -97,16 +97,78 @@ compare FAILED: 21465 pixels differ from ...                                    
 ## Open questions for the human
 - None outstanding. Resolved 2026-11-13: commit `cb635f9` ("remove co authoring", three lines in `CLAUDE.md`) is intended and is left as is; PRs target `master`.
 
-## Phase 1 status (paused 2026-11-13)
-Done and committed: task 1 (registers, flags, DMG post-boot state; `c02279f`).
-Committed as partial: task 2 (`bus.rs` with tick-per-access, WRAM/HRAM/VRAM/OAM, IE/IF; `Mapper` trait with ROM-only and minimal MBC1 ROM banking). `cargo fmt` and `cargo clippy --workspace --all-targets -- -D warnings` pass. `cargo test -p gb-core --lib`: `test result: ok. 17 passed; 0 failed`.
-Not started: tasks 3-13 (fetch/decode, ALU, jumps, CB ops, interrupts, serial, minimal timer, Doctor trace, illegal opcodes, ROM tests).
+## Phase 1 — CPU: gate status (2026-11-13)
+Environment: Windows Smart App Control blocks freshly built test executables, so all builds and tests below were run in **WSL Ubuntu** (rustc/cargo 1.100.0, build output in `~/gb-target`, sources read from the Windows tree). No workaround for the block was attempted.
 
-**Blocker:** Windows Smart App Control is on and blocks newly built test executables (`os error 4551`, "Un criterio di controllo dell'applicazione ha bloccato il file"), e.g. `harness_smoke` and the `gb-cli` unit tests, which ran in phase 0. The owner will install WSL and build/test there. No workaround attempted.
-The harness smoke test and gb-cli tests were therefore NOT re-run after task 2 (Cartridge no longer derives `Clone`; nothing in the workspace used it). Re-run `cargo test --workspace` first when resuming.
+- [x] Unit tests for ALU/flag logic: `alu.rs` checks ADD/ADC/SUB/SBC against a slow reference for all 256x256x2 operands.
+- [x] Each Blargg `cpu_instrs/individual/01..11` prints `Passed`.
+- [x] Combined `cpu_instrs.gb` passes, using the minimal MBC1 (ROM banking only).
+- [x] Doctor trace diff clean for 01..11 (`crates/gb-core/tests/doctor_trace.rs`; line counts below).
+- [x] Automated `cargo test` runs the individual ROMs and the combined ROM (`tests/cpu_instrs.rs`), skipping if absent.
+- [x] Scoreboard has real result lines (below).
 
-## Phase 1 reminders
-- Phase 1 adds a **minimal timer** (DIV/TIMA/TMA/TAC, simple counter, overflow interrupt) because Blargg 02-interrupts needs it. **Phase 2 MUST REPLACE it with the accurate falling-edge implementation.**
-- Combined `cpu_instrs.gb` uses the minimal MBC1 (ROM banking only); phase 2 replaces it with the full mapper.
-- Doctor logs will be fetched by an extended `scripts/fetch_test_roms.sh` (pinned commit + SHA-256).
-- LY (0xFF44) has no PPU yet; if a Blargg ROM hangs waiting on it, add a stand-in and record it here.
+### Phase 1 scoreboard (real output)
+```
+$ cargo test --workspace            (WSL)
+test result: ok. 6 passed; 0 failed    (gb-cli)
+test result: ok. 42 passed; 0 failed   (gb-core unit: registers, alu, bus, timer, mbc1, cpu, header)
+test result: ok. 12 passed; 0 failed   (gb-core tests/cpu_instrs.rs)
+test result: ok. 11 passed; 0 failed   (gb-core tests/doctor_trace.rs, 49 s)
+test result: ok. 2 passed; 0 failed    (gb-core tests/harness_smoke.rs)
+$ cargo clippy --workspace --all-targets -- -D warnings     -> no output (clean)
+$ cargo fmt --all -- --check                                 -> fmt-ok
+
+$ cargo test -p gb-core --test cpu_instrs -- --nocapture
+01-special.gb: Passed after 1300335 instructions
+02-interrupts.gb: Passed after 203515 instructions
+03-op sp,hl.gb: Passed after 1109862 instructions
+04-op r,imm.gb: Passed after 1304206 instructions
+05-op rp.gb: Passed after 1804828 instructions
+06-ld r,r.gb: Passed after 284713 instructions
+07-jr,jp,call,ret,rst.gb: Passed after 337852 instructions
+08-misc instrs.gb: Passed after 265332 instructions
+09-op r,r.gb: Passed after 4461822 instructions
+10-bit ops.gb: Passed after 6756163 instructions
+11-op a,(hl).gb: Passed after 7471202 instructions
+cpu_instrs.gb (combined): Passed after 24914321 instructions
+
+$ gb-cli run cpu_instrs.gb --max-instructions 80000000 --serial --expect-serial Passed
+cpu_instrs
+01:ok  02:ok  03:ok  04:ok  05:ok  06:ok  07:ok  08:ok  09:ok  10:ok  11:ok
+Passed all tests
+serial check passed: found "Passed"
+
+$ cargo test -p gb-core --test doctor_trace -- --nocapture    (matching lines per ROM)
+01: 1256633   02: 161057   03: 1066160   04: 1260504   05: 1761126   06: 241011
+07: 587415    08: 221630   09: 4418120   10: 6712461   11: 7427500    (all: 11 passed; 0 failed)
+
+$ gb-cli run "06-ld r,r.gb" --max-instructions 241011 --trace /tmp/t6.log ; cmp /tmp/t6.log 6.log
+241011 /tmp/t6.log
+TRACE IDENTICAL to Doctor log 6
+```
+Note: each Blargg ROM was first run through `gb-cli` and passed on the first attempt; the Doctor test then found three *convention* differences (below), not CPU bugs.
+
+### Phase 1 decisions
+- **Timing:** every bus access ticks 4 T-cycles, no cycle tables. A `read`/`write` ticks *before* the access happens. Revisit in phase 2 with `mem_timing` if a ROM disagrees.
+- **Minimal timer (`timer.rs`) is a stand-in. Phase 2 MUST REPLACE it with the accurate falling-edge implementation** (DIV/TIMA/TMA/TAC; delayed TMA reload; TAC-write glitches). Added at the owner's request because 02-interrupts needs a timer interrupt; this slightly extends the phase file's "timer out of scope".
+- **Minimal MBC1 (`cartridge/mbc1.rs`)** has ROM banking only (5-bit register); phase 2 replaces it with the full MBC1 plus MBC3/5, RAM, RTC.
+- **Mapper trait** has `read_rom/write_rom/read_ram/write_ram/save_data/load_save`; `Cartridge` holds a `Box<dyn Mapper>` and no longer derives `Clone`.
+- **STOP** is treated as a 2-byte NOP (low-power mode is not needed yet).
+- **Interrupt dispatch** picks the vector after the high-byte push (jumps to 0x0000 if IE was cleared by it).
+- **Gameboy Doctor conventions** (in `--trace` and `doctor_trace.rs` only; normal emulation follows hardware):
+  1. LY reads a constant 0x90 in "doctor mode" (there is no PPU yet).
+  2. IF reads **without** its unused upper bits in doctor mode. Real hardware (and normal mode here) reads them as 1; Doctor's reference emulator does not.
+  3. Doctor logs have one line per *instruction*: no line for the state right after an interrupt dispatch, none for idle HALT cycles, but one line for the state after HALT itself. `Cpu::is_trace_point` encodes that.
+- **Doctor logs** are fetched by a separate `scripts/fetch_doctor_logs.sh` (not by extending `fetch_test_roms.sh`), pinned to `robert/gameboy-doctor` commit `cc742777…` with per-file SHA-256 (trust on first use, computed 2026-11-13). Output in gitignored `tests/roms/gameboy-doctor/`. CI runs it before the tests.
+- **`[profile.test] opt-level = 3`** in the workspace `Cargo.toml`: the ROM tests run ~25M instructions and the Doctor diffs ~25M lines.
+- **LY stand-in was not needed**: Blargg cpu_instrs does not wait on LY, so no fake LY exists outside doctor mode.
+
+### Phase 1 known issues
+- `unzip` is not installed in this WSL distro, so `scripts/fetch_*.sh` were run from Git Bash on Windows (the tree is shared). CI (ubuntu) has `unzip`.
+- `--mooneye` is still unimplemented (exit 2); it belongs to phase 2's gate.
+- `halt_bug` ROM and the other Blargg suites (`instr_timing`, `mem_timing`, `halt_bug`) have not been run; they are phase 2 gates. Only the HALT-bug unit test exists.
+- CI (`.github/workflows/ci.yml`) has still never run on GitHub.
+
+## Phase 2 reminders
+- [ ] **Replace the phase-1 minimal timer with the accurate falling-edge implementation.**
+- [ ] **Replace the phase-1 minimal MBC1 with the full mapper (and MBC3/MBC5).**
