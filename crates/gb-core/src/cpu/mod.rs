@@ -115,7 +115,6 @@ impl Cpu {
     }
 
     /// 2 M-cycles.
-    #[allow(dead_code)] // used from task 5 (POP/RET); remove then
     fn pop16(&mut self, bus: &mut Bus) -> u16 {
         let lo = bus.read(self.regs.sp);
         self.regs.sp = self.regs.sp.wrapping_add(1);
@@ -149,6 +148,50 @@ impl Cpu {
             6 => bus.write(self.regs.hl(), v),
             _ => self.regs.a = v,
         }
+    }
+
+    /// 16-bit register pair for LD/INC/DEC/ADD: 0..3 = BC, DE, HL, SP.
+    fn get_rr(&self, p: u8) -> u16 {
+        match p {
+            0 => self.regs.bc(),
+            1 => self.regs.de(),
+            2 => self.regs.hl(),
+            _ => self.regs.sp,
+        }
+    }
+
+    fn set_rr(&mut self, p: u8, v: u16) {
+        match p {
+            0 => self.regs.set_bc(v),
+            1 => self.regs.set_de(v),
+            2 => self.regs.set_hl(v),
+            _ => self.regs.sp = v,
+        }
+    }
+
+    /// Register pair for PUSH/POP: 0..3 = BC, DE, HL, AF.
+    fn get_stack_rr(&self, p: u8) -> u16 {
+        match p {
+            3 => self.regs.af(),
+            _ => self.get_rr(p),
+        }
+    }
+
+    /// `POP AF` lands here: `set_af` masks the low nibble of F, which is always 0.
+    fn set_stack_rr(&mut self, p: u8, v: u16) {
+        match p {
+            3 => self.regs.set_af(v),
+            _ => self.set_rr(p, v),
+        }
+    }
+
+    /// SP + signed e8, with flags. Pan Docs: Z=0, N=0, and H and C come from the carries of the
+    /// *unsigned low-byte* addition, regardless of the sign of e8.
+    fn sp_plus_e8(&mut self, sp: u16, e: u8) -> u16 {
+        let h = (sp & 0xF) + u16::from(e & 0xF) > 0xF;
+        let c = (sp & 0xFF) + u16::from(e) > 0xFF;
+        self.regs.set_flags(false, false, h, c);
+        sp.wrapping_add(e as i8 as u16)
     }
 
     // ---- interrupts ----------------------------------------------------------------------
@@ -224,6 +267,39 @@ impl Cpu {
                 }
                 _ => self.todo_lock(),
             },
+            1 => {
+                let p = y >> 1;
+                if y & 1 == 0 {
+                    // LD rr,nn
+                    let nn = self.fetch16(bus);
+                    self.set_rr(p, nn);
+                } else {
+                    // ADD HL,rr: 2 M-cycles (the 16-bit add takes one internal cycle).
+                    let rr = self.get_rr(p);
+                    bus.idle();
+                    let hl = self.regs.hl();
+                    // Pan Docs: H is carry out of bit 11, C out of bit 15, Z is untouched.
+                    let h = (hl & 0x0FFF) + (rr & 0x0FFF) > 0x0FFF;
+                    let (r, c) = hl.overflowing_add(rr);
+                    self.regs.set_hl(r);
+                    let z = self.regs.flag(FLAG_Z);
+                    self.regs.set_flags(z, false, h, c);
+                }
+            }
+            3 => {
+                // INC rr / DEC rr: no flags; the 16-bit increment costs one internal cycle.
+                let p = y >> 1;
+                let v = self.get_rr(p);
+                self.set_rr(
+                    p,
+                    if y & 1 == 0 {
+                        v.wrapping_add(1)
+                    } else {
+                        v.wrapping_sub(1)
+                    },
+                );
+                bus.idle();
+            }
             2 => {
                 // LD (rr),A / LD A,(rr) with HL+ / HL-
                 let addr = match y >> 1 {
@@ -293,6 +369,36 @@ impl Cpu {
             (2, 7) => {
                 let addr = self.fetch16(bus);
                 self.regs.a = bus.read(addr);
+            }
+            // POP rr / PUSH rr (BC, DE, HL, AF)
+            (1, _) if y & 1 == 0 => {
+                let v = self.pop16(bus);
+                self.set_stack_rr(y >> 1, v);
+            }
+            (5, _) if y & 1 == 0 => {
+                let v = self.get_stack_rr(y >> 1);
+                bus.idle(); // internal cycle before the two writes
+                self.push16(bus, v);
+            }
+            // LD SP,HL
+            (1, 7) => {
+                self.regs.sp = self.regs.hl();
+                bus.idle();
+            }
+            // ADD SP,e8 and LD HL,SP+e8
+            (0, 5) => {
+                let e = self.fetch(bus);
+                let sp = self.regs.sp;
+                let r = self.sp_plus_e8(sp, e);
+                bus.idle();
+                bus.idle();
+                self.regs.sp = r;
+            }
+            (0, 7) => {
+                let e = self.fetch(bus);
+                let r = self.sp_plus_e8(self.regs.sp, e);
+                bus.idle();
+                self.regs.set_hl(r);
             }
             // ALU A,n
             (6, _) => {
@@ -449,6 +555,41 @@ mod tests {
         assert_eq!(bus.peek(0xC000), 0x06);
         assert_eq!(step_m(&mut cpu, &mut bus), 1);
         assert_eq!(cpu.regs.a, 0x0B);
+    }
+
+    #[test]
+    fn sixteen_bit_loads_push_pop_and_timing() {
+        // LD BC,0x1234 ; PUSH BC ; POP AF ; LD SP,HL ; INC HL ; ADD HL,DE
+        let (mut cpu, mut bus) = setup(&[0x01, 0x34, 0x12, 0xC5, 0xF1, 0xF9, 0x23, 0x19]);
+        cpu.regs.sp = 0xDFF0;
+        assert_eq!(step_m(&mut cpu, &mut bus), 3);
+        assert_eq!(step_m(&mut cpu, &mut bus), 4);
+        assert_eq!((bus.peek(0xDFEF), bus.peek(0xDFEE)), (0x12, 0x34));
+        assert_eq!(step_m(&mut cpu, &mut bus), 3);
+        assert_eq!(cpu.regs.af(), 0x1230, "POP AF masks the low nibble of F");
+        cpu.regs.set_hl(0x0FFF);
+        cpu.regs.set_de(0x0001);
+        assert_eq!(step_m(&mut cpu, &mut bus), 2);
+        assert_eq!(cpu.regs.sp, 0x0FFF);
+        assert_eq!(step_m(&mut cpu, &mut bus), 2);
+        assert_eq!(cpu.regs.hl(), 0x1000);
+        cpu.regs.set_hl(0x0FFF);
+        assert_eq!(step_m(&mut cpu, &mut bus), 2);
+        assert_eq!(cpu.regs.hl(), 0x1000);
+        assert!(cpu.regs.flag(FLAG_H) && !cpu.regs.flag(FLAG_C));
+    }
+
+    #[test]
+    fn add_sp_e8_flags_use_low_byte_carries() {
+        // ADD SP,-1 ; LD HL,SP+1
+        let (mut cpu, mut bus) = setup(&[0xE8, 0xFF, 0xF8, 0x01]);
+        cpu.regs.sp = 0x00FF;
+        assert_eq!(step_m(&mut cpu, &mut bus), 4);
+        assert_eq!(cpu.regs.sp, 0x00FE);
+        assert_eq!(cpu.regs.f(), FLAG_H | FLAG_C);
+        assert_eq!(step_m(&mut cpu, &mut bus), 3);
+        assert_eq!(cpu.regs.hl(), 0x00FF);
+        assert_eq!(cpu.regs.f(), 0);
     }
 
     #[test]
