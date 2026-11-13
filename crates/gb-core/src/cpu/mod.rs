@@ -9,6 +9,7 @@
 //! the layout is the same one used by the Z80). The 3-bit register code is
 //! 0..7 = B, C, D, E, H, L, (HL), A.
 
+mod alu;
 pub mod registers;
 
 use crate::bus::Bus;
@@ -245,6 +246,22 @@ impl Cpu {
                     self.regs.a = bus.read(addr);
                 }
             }
+            4 | 5 => {
+                // INC r / DEC r. For (HL) this is a read-modify-write: 3 M-cycles in total.
+                let v = self.get_r8(bus, y);
+                let (r, f) = if z == 4 {
+                    alu::inc(v, self.regs.f())
+                } else {
+                    alu::dec(v, self.regs.f())
+                };
+                self.set_r8(bus, y, r);
+                self.regs.set_flags(
+                    f & FLAG_Z != 0,
+                    f & FLAG_N != 0,
+                    f & FLAG_H != 0,
+                    f & FLAG_C != 0,
+                );
+            }
             6 => {
                 // LD r,n
                 let n = self.fetch(bus);
@@ -277,6 +294,11 @@ impl Cpu {
                 let addr = self.fetch16(bus);
                 self.regs.a = bus.read(addr);
             }
+            // ALU A,n
+            (6, _) => {
+                let n = self.fetch(bus);
+                self.alu(y, n);
+            }
             _ => self.todo_lock(),
         }
     }
@@ -286,9 +308,28 @@ impl Cpu {
         self.locked = true;
     }
 
-    /// 8-bit ALU operation `y` on A (0..7 = ADD ADC SUB SBC AND XOR OR CP). Added in task 4.
-    fn alu(&mut self, _y: u8, _v: u8) {
-        self.todo_lock();
+    /// 8-bit ALU operation `y` on A (0..7 = ADD ADC SUB SBC AND XOR OR CP).
+    fn alu(&mut self, y: u8, v: u8) {
+        let a = self.regs.a;
+        let carry = self.regs.flag(FLAG_C);
+        let (result, f) = match y {
+            0 => alu::add(a, v, false),
+            1 => alu::add(a, v, carry),
+            2 | 7 => alu::sub(a, v, false), // CP is SUB without storing the result
+            3 => alu::sub(a, v, carry),
+            4 => alu::and(a, v),
+            5 => alu::xor(a, v),
+            _ => alu::or(a, v),
+        };
+        if y != 7 {
+            self.regs.a = result;
+        }
+        self.regs.set_flags(
+            f & FLAG_Z != 0,
+            f & FLAG_N != 0,
+            f & FLAG_H != 0,
+            f & FLAG_C != 0,
+        );
     }
 }
 
@@ -384,6 +425,30 @@ mod tests {
         cpu.regs.a = 0;
         assert_eq!(step_m(&mut cpu, &mut bus), 2);
         assert_eq!(cpu.regs.a, 0x33);
+    }
+
+    #[test]
+    fn alu_instructions_and_timing() {
+        // ADD A,B ; ADC A,0x01 ; SUB (HL) ; CP 0x10 ; INC (HL) ; DEC A
+        let (mut cpu, mut bus) = setup(&[0x80, 0xCE, 0x01, 0x96, 0xFE, 0x10, 0x34, 0x3D]);
+        cpu.regs.a = 0x0F;
+        cpu.regs.b = 0x01;
+        cpu.regs.set_hl(0xC000);
+        bus.write(0xC000, 0x05);
+        assert_eq!(step_m(&mut cpu, &mut bus), 1);
+        assert_eq!(cpu.regs.a, 0x10);
+        assert_eq!(cpu.regs.f(), FLAG_H);
+        assert_eq!(step_m(&mut cpu, &mut bus), 2);
+        assert_eq!(cpu.regs.a, 0x11);
+        assert_eq!(step_m(&mut cpu, &mut bus), 2);
+        assert_eq!(cpu.regs.a, 0x0C);
+        assert_eq!(step_m(&mut cpu, &mut bus), 2);
+        assert_eq!(cpu.regs.a, 0x0C, "CP must not store");
+        assert!(cpu.regs.flag(FLAG_C), "0x0C < 0x10 borrows");
+        assert_eq!(step_m(&mut cpu, &mut bus), 3);
+        assert_eq!(bus.peek(0xC000), 0x06);
+        assert_eq!(step_m(&mut cpu, &mut bus), 1);
+        assert_eq!(cpu.regs.a, 0x0B);
     }
 
     #[test]
