@@ -1,0 +1,18 @@
+[package]
+name = "gb-cli"
+description = "Headless runner for tests and tracing."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "gb-cli"
+path = "src/main.rs"
+
+[dependencies]
+gb-core = { path = "../gb-core" }
+# clap: argument parsing for the CLI. Standard, no transitive surprises (CLAUDE.md §2).
+clap = { version = "4", features = ["derive"] }
+# png: writing screenshots and reading reference images for --compare (CLAUDE.md §2).
+png = "0.17"

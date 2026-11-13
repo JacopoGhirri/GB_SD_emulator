@@ -1,0 +1,2 @@
+# Defaults are fine (CLAUDE.md §4.4). Kept explicit so the setting is discoverable.
+edition = "2021"

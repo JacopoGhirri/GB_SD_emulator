@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/gb-core",
+    "crates/gb-cli",
+    "crates/gb-sdl",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[profile.release]
+# Emulator inner loops benefit from inlining across crates.
+codegen-units = 1

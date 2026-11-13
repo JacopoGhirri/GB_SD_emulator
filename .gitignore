@@ -1,0 +1,24 @@
+# Build output
+target/
+
+# User's own game ROMs: never commit (CLAUDE.md §10)
+roms/
+
+# Third-party test ROMs, fetched by scripts/fetch_test_roms.sh
+tests/roms/
+
+# Save files and debug dumps
+*.sav
+*.ppm
+*.png
+!tests/expected/
+!tests/expected/**
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
+
+# NOTE: Cargo.lock is intentionally NOT ignored. This workspace ships binaries.

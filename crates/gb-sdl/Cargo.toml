@@ -1,0 +1,10 @@
+[package]
+name = "gb-sdl"
+description = "Desktop / Steam Deck frontend. Empty until Phase 4 (SDL2 is added then)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# gb-core is added here in phase 4, when the frontend starts driving the emulator.
