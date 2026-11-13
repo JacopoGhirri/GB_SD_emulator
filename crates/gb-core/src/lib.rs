@@ -4,6 +4,7 @@
 //! No CPU, PPU, APU or timer exists yet, so `GameBoy` returns placeholder values.
 
 pub mod cartridge;
+pub mod cpu;
 
 pub use cartridge::{Cartridge, CartridgeError};
 
