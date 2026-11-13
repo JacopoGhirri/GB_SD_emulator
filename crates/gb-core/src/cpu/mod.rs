@@ -150,6 +150,34 @@ impl Cpu {
         }
     }
 
+    /// Branch condition code 0..3 = NZ, Z, NC, C.
+    fn condition(&self, cc: u8) -> bool {
+        match cc & 3 {
+            0 => !self.regs.flag(FLAG_Z),
+            1 => self.regs.flag(FLAG_Z),
+            2 => !self.regs.flag(FLAG_C),
+            _ => self.regs.flag(FLAG_C),
+        }
+    }
+
+    /// JR e8: the offset is signed and relative to the PC *after* the operand.
+    /// 3 M-cycles if taken, 2 if not.
+    fn jr(&mut self, bus: &mut Bus, taken: bool) {
+        let e = self.fetch(bus) as i8;
+        if taken {
+            self.regs.pc = self.regs.pc.wrapping_add(e as u16);
+            bus.idle();
+        }
+    }
+
+    /// Push the return address (PC after the operand) and jump. 1 idle + 2 writes.
+    fn call(&mut self, bus: &mut Bus, target: u16) {
+        bus.idle();
+        let pc = self.regs.pc;
+        self.push16(bus, pc);
+        self.regs.pc = target;
+    }
+
     /// 16-bit register pair for LD/INC/DEC/ADD: 0..3 = BC, DE, HL, SP.
     fn get_rr(&self, p: u8) -> u16 {
         match p {
@@ -265,7 +293,12 @@ impl Cpu {
                     // the low-power mode is not needed by the CPU tests.
                     self.fetch(bus);
                 }
-                _ => self.todo_lock(),
+                3 => self.jr(bus, true),
+                _ => {
+                    // JR cc,e8 (y = 4..7 selects NZ, Z, NC, C)
+                    let taken = self.condition(y - 4);
+                    self.jr(bus, taken);
+                }
             },
             1 => {
                 let p = y >> 1;
@@ -370,6 +403,51 @@ impl Cpu {
                 let addr = self.fetch16(bus);
                 self.regs.a = bus.read(addr);
             }
+            // RET cc: 2 M-cycles if not taken, 5 if taken
+            (0, 0..=3) => {
+                bus.idle(); // condition check
+                if self.condition(y) {
+                    self.regs.pc = self.pop16(bus);
+                    bus.idle();
+                }
+            }
+            // RET (4 M-cycles) and RETI (same, and re-enables interrupts immediately)
+            (1, 1) | (1, 3) => {
+                self.regs.pc = self.pop16(bus);
+                bus.idle();
+                if y == 3 {
+                    self.ime = true;
+                }
+            }
+            // JP HL: just 1 M-cycle (the fetch)
+            (1, 5) => self.regs.pc = self.regs.hl(),
+            // JP cc,nn: 3 M-cycles if not taken, 4 if taken
+            (2, 0..=3) => {
+                let nn = self.fetch16(bus);
+                if self.condition(y) {
+                    self.regs.pc = nn;
+                    bus.idle();
+                }
+            }
+            // JP nn
+            (3, 0) => {
+                self.regs.pc = self.fetch16(bus);
+                bus.idle();
+            }
+            // CALL cc,nn: 3 M-cycles if not taken, 6 if taken
+            (4, 0..=3) => {
+                let nn = self.fetch16(bus);
+                if self.condition(y) {
+                    self.call(bus, nn);
+                }
+            }
+            // CALL nn
+            (5, 1) => {
+                let nn = self.fetch16(bus);
+                self.call(bus, nn);
+            }
+            // RST: call to a fixed address y*8
+            (7, _) => self.call(bus, u16::from(y) * 8),
             // POP rr / PUSH rr (BC, DE, HL, AF)
             (1, _) if y & 1 == 0 => {
                 let v = self.pop16(bus);
@@ -590,6 +668,61 @@ mod tests {
         assert_eq!(step_m(&mut cpu, &mut bus), 3);
         assert_eq!(cpu.regs.hl(), 0x00FF);
         assert_eq!(cpu.regs.f(), 0);
+    }
+
+    #[test]
+    fn jumps_calls_returns_timing() {
+        // 0x100: JP 0x0110
+        let (mut cpu, mut bus) = setup(&[0xC3, 0x10, 0x01]);
+        assert_eq!(step_m(&mut cpu, &mut bus), 4);
+        assert_eq!(cpu.regs.pc, 0x0110);
+        // The rest runs from WRAM, because ROM is not writable.
+        let (mut cpu, mut bus) = setup(&[]);
+        cpu.regs.pc = 0xC000;
+        cpu.regs.sp = 0xDFF0;
+        let prog = [
+            0xCD, 0x10, 0xC0, // C000: CALL C010
+            0x20, 0x02, // C003: JR NZ,+2 (taken: Z clear)
+            0x00, 0x00, // C005: skipped
+            0x28, 0x7F, // C007: JR Z,+127 (not taken)
+        ];
+        for (i, b) in prog.iter().enumerate() {
+            bus.write(0xC000 + i as u16, *b);
+        }
+        bus.write(0xC010, 0xC9); // RET
+        cpu.regs.set_flags(false, false, false, false);
+        assert_eq!(step_m(&mut cpu, &mut bus), 6, "CALL");
+        assert_eq!(cpu.regs.pc, 0xC010);
+        assert_eq!((bus.peek(0xDFEF), bus.peek(0xDFEE)), (0xC0, 0x03));
+        assert_eq!(step_m(&mut cpu, &mut bus), 4, "RET");
+        assert_eq!(cpu.regs.pc, 0xC003);
+        assert_eq!(step_m(&mut cpu, &mut bus), 3, "JR taken");
+        assert_eq!(cpu.regs.pc, 0xC007);
+        cpu.regs.set_flags(false, false, false, false);
+        assert_eq!(step_m(&mut cpu, &mut bus), 2, "JR Z not taken");
+        assert_eq!(cpu.regs.pc, 0xC009);
+    }
+
+    #[test]
+    fn conditional_ret_and_call_cycle_counts() {
+        let (mut cpu, mut bus) = setup(&[]);
+        cpu.regs.sp = 0xDFF0;
+        // RET NZ at C000 (taken), RET Z at C001 (not taken), RST 0x08 at C002, CALL Z at C003
+        for (i, b) in [0xC0u8, 0xC8, 0xCF, 0xCC, 0x00, 0xD0].iter().enumerate() {
+            bus.write(0xC000 + i as u16, *b);
+        }
+        bus.write(0xDFF0, 0x01); // return address 0xC001 on the stack
+        bus.write(0xDFF1, 0xC0);
+        cpu.regs.pc = 0xC000;
+        cpu.regs.set_flags(false, false, false, false);
+        assert_eq!(step_m(&mut cpu, &mut bus), 5, "RET cc taken");
+        assert_eq!(cpu.regs.pc, 0xC001);
+        assert_eq!(step_m(&mut cpu, &mut bus), 2, "RET cc not taken");
+        assert_eq!(step_m(&mut cpu, &mut bus), 4, "RST");
+        assert_eq!(cpu.regs.pc, 0x0008);
+        cpu.regs.pc = 0xC003;
+        assert_eq!(step_m(&mut cpu, &mut bus), 3, "CALL cc not taken");
+        assert_eq!(cpu.regs.pc, 0xC006);
     }
 
     #[test]
