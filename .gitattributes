@@ -1,0 +1,10 @@
+# Keep text files LF in the repo and in checkouts. Shell scripts must stay LF
+# or they fail in Git Bash on Windows and on the Linux CI runner.
+* text=auto eol=lf
+
+# Binary assets must never be touched by line-ending conversion.
+*.gb binary
+*.gbc binary
+*.sav binary
+*.png binary
+*.bmp binary
