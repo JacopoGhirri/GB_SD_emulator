@@ -5,6 +5,7 @@
 //! the accesses it makes. Internal delay cycles call [`Bus::idle`].
 
 use crate::cartridge::Cartridge;
+use crate::timer::{Timer, REG_DIV, REG_TAC, TIMER_INTERRUPT_BIT};
 
 /// T-cycles per M-cycle. The CPU does one bus access per M-cycle.
 pub const T_CYCLES_PER_M_CYCLE: u32 = 4;
@@ -31,6 +32,11 @@ const HRAM_END: u16 = 0xFFFE;
 // I/O registers.
 pub const REG_IF: u16 = 0xFF0F;
 pub const REG_IE: u16 = 0xFFFF;
+/// Serial transfer data and control (Pan Docs "Serial Data Transfer").
+pub const REG_SB: u16 = 0xFF01;
+pub const REG_SC: u16 = 0xFF02;
+/// SC value that starts a transfer using the internal clock.
+const SC_START_INTERNAL_CLOCK: u8 = 0x81;
 
 /// The five interrupt sources occupy bits 0..=4 of IE and IF (Pan Docs "Interrupts").
 pub const INTERRUPT_MASK: u8 = 0x1F;
@@ -47,6 +53,9 @@ pub struct Bus {
     interrupt_flag: u8,
     /// Total T-cycles since power-on.
     cycles: u64,
+    timer: Timer,
+    /// Bytes the program "sent" over the serial port. Test ROMs print their verdict here.
+    serial_out: Vec<u8>,
 }
 
 impl Bus {
@@ -62,6 +71,8 @@ impl Bus {
             // Post-boot IF on DMG has VBlank pending (Pan Docs "Power-Up Sequence").
             interrupt_flag: 0x01,
             cycles: 0,
+            timer: Timer::new(),
+            serial_out: Vec::new(),
         }
     }
 
@@ -77,6 +88,9 @@ impl Bus {
     /// Advance the whole system by one M-cycle (4 T-cycles).
     pub fn tick(&mut self) {
         self.cycles += u64::from(T_CYCLES_PER_M_CYCLE);
+        if self.timer.tick(T_CYCLES_PER_M_CYCLE) {
+            self.request_interrupt(TIMER_INTERRUPT_BIT);
+        }
     }
 
     /// An M-cycle in which the CPU does no memory access (internal delay).
@@ -132,6 +146,7 @@ impl Bus {
         match addr {
             // The upper three bits of IF are unused and read as 1.
             REG_IF => self.interrupt_flag | !INTERRUPT_MASK,
+            REG_DIV..=REG_TAC => self.timer.read(addr),
             _ => self.io[(addr - IO_START) as usize],
         }
     }
@@ -139,8 +154,21 @@ impl Bus {
     fn write_io(&mut self, addr: u16, value: u8) {
         match addr {
             REG_IF => self.interrupt_flag = value & INTERRUPT_MASK,
+            REG_DIV..=REG_TAC => self.timer.write(addr, value),
+            REG_SC => {
+                self.io[(addr - IO_START) as usize] = value;
+                // No link partner exists: capture the byte as soon as a transfer is started.
+                if value == SC_START_INTERNAL_CLOCK {
+                    self.serial_out.push(self.io[(REG_SB - IO_START) as usize]);
+                }
+            }
             _ => self.io[(addr - IO_START) as usize] = value,
         }
+    }
+
+    /// Bytes written to the serial port since the last call.
+    pub fn take_serial(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.serial_out)
     }
 
     /// Interrupts that are both enabled in IE and requested in IF.
@@ -203,5 +231,32 @@ mod tests {
         assert_eq!(bus.pending_interrupts(), 0x04);
         bus.clear_interrupt(2);
         assert_eq!(bus.pending_interrupts(), 0);
+    }
+
+    #[test]
+    fn serial_write_of_0x81_captures_sb() {
+        let mut bus = test_bus();
+        bus.write(REG_SB, b'H');
+        bus.write(REG_SC, 0x81);
+        bus.write(REG_SB, b'i');
+        bus.write(REG_SC, 0x80); // not a start-transfer value: ignored
+        bus.write(REG_SC, 0x81);
+        assert_eq!(bus.take_serial(), b"Hi");
+        assert!(bus.take_serial().is_empty(), "buffer is drained");
+    }
+
+    #[test]
+    fn timer_overflow_raises_interrupt_flag() {
+        let mut bus = test_bus();
+        bus.write(REG_TAC, 0b101); // enabled, 16 T-cycles per TIMA tick
+        bus.write(crate::timer::REG_TIMA, 0xFF);
+        // The TIMA write above already cost one M-cycle with the timer running, so 3 more
+        // M-cycles complete the 16 T-cycles; 2 are not enough.
+        for _ in 0..2 {
+            bus.idle();
+        }
+        assert_eq!(bus.peek(REG_IF) & 0x04, 0);
+        bus.idle(); // 16 T-cycles reached
+        assert_eq!(bus.peek(REG_IF) & 0x04, 0x04);
     }
 }

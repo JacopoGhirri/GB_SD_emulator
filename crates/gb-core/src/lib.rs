@@ -6,6 +6,7 @@
 pub mod bus;
 pub mod cartridge;
 pub mod cpu;
+pub mod timer;
 
 pub use bus::Bus;
 pub use cartridge::{Cartridge, CartridgeError};
@@ -85,9 +86,9 @@ impl GameBoy {
 
     pub fn set_buttons(&mut self, _buttons: Buttons) {}
 
-    /// Bytes written to the serial port since the last call. Placeholder: always empty.
+    /// Bytes written to the serial port since the last call.
     pub fn take_serial(&mut self) -> Vec<u8> {
-        Vec::new()
+        self.bus.take_serial()
     }
 
     /// Cartridge RAM for battery saves. Placeholder: empty.
