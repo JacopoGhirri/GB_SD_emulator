@@ -62,6 +62,51 @@ pub fn dec(v: u8, old_flags: u8) -> (u8, u8) {
     )
 }
 
+/// Rotate/shift group, selected by `y` as in the CB opcode layout:
+/// 0 RLC, 1 RRC, 2 RL, 3 RR, 4 SLA, 5 SRA, 6 SWAP, 7 SRL.
+/// Returns (result, carry out). The caller decides Z: the CB forms set it from the result,
+/// the accumulator forms (RLCA/RRCA/RLA/RRA) always clear it.
+pub fn rot_shift(y: u8, v: u8, carry_in: bool) -> (u8, bool) {
+    match y {
+        0 => (v.rotate_left(1), v & 0x80 != 0),
+        1 => (v.rotate_right(1), v & 1 != 0),
+        2 => ((v << 1) | u8::from(carry_in), v & 0x80 != 0),
+        3 => ((v >> 1) | (u8::from(carry_in) << 7), v & 1 != 0),
+        4 => (v << 1, v & 0x80 != 0),
+        // SRA keeps the sign bit (bit 7).
+        5 => ((v >> 1) | (v & 0x80), v & 1 != 0),
+        // SWAP exchanges the nibbles and clears carry.
+        6 => (v.rotate_left(4), false),
+        _ => (v >> 1, v & 1 != 0),
+    }
+}
+
+/// DAA (Pan Docs "DAA"): adjust A to packed BCD after an add or subtract.
+/// Returns (new A, new flags). H is cleared, N is preserved, Z comes from the result.
+pub fn daa(a: u8, n: bool, h: bool, c: bool) -> (u8, u8) {
+    let mut a = a;
+    let mut carry = c;
+    if !n {
+        // After an addition.
+        if c || a > 0x99 {
+            a = a.wrapping_add(0x60);
+            carry = true;
+        }
+        if h || (a & 0x0F) > 0x09 {
+            a = a.wrapping_add(0x06);
+        }
+    } else {
+        // After a subtraction only the flags say what to correct.
+        if c {
+            a = a.wrapping_sub(0x60);
+        }
+        if h {
+            a = a.wrapping_sub(0x06);
+        }
+    }
+    (a, flags(a == 0, n, false, carry))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

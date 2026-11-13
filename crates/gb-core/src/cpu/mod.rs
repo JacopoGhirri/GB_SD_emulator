@@ -78,12 +78,15 @@ impl Cpu {
             return;
         }
 
-        let opcode = self.fetch(bus);
-        self.execute(bus, opcode);
-
+        // EI's delay: IME turns on after the interrupt check above (so the instruction right
+        // after EI cannot be interrupted) but before that instruction runs, so that an
+        // immediately following DI still wins.
         if enable_ime_after {
             self.ime = true;
         }
+
+        let opcode = self.fetch(bus);
+        self.execute(bus, opcode);
     }
 
     // ---- bus helpers ---------------------------------------------------------------------
@@ -376,7 +379,70 @@ impl Cpu {
                 let n = self.fetch(bus);
                 self.set_r8(bus, y, n);
             }
-            _ => self.todo_lock(),
+            _ => match y {
+                // RLCA, RRCA, RLA, RRA: same as the CB rotates on A, but Z is always cleared.
+                0..=3 => {
+                    let (r, c) = alu::rot_shift(y, self.regs.a, self.regs.flag(FLAG_C));
+                    self.regs.a = r;
+                    self.regs.set_flags(false, false, false, c);
+                }
+                4 => {
+                    let r = &self.regs;
+                    let (a, f) = alu::daa(r.a, r.flag(FLAG_N), r.flag(FLAG_H), r.flag(FLAG_C));
+                    self.regs.a = a;
+                    self.set_flags_byte(f);
+                }
+                5 => {
+                    // CPL: complement A. Sets N and H, leaves Z and C.
+                    self.regs.a = !self.regs.a;
+                    let (z, c) = (self.regs.flag(FLAG_Z), self.regs.flag(FLAG_C));
+                    self.regs.set_flags(z, true, true, c);
+                }
+                6 => {
+                    // SCF: set carry. Clears N and H, leaves Z.
+                    let z = self.regs.flag(FLAG_Z);
+                    self.regs.set_flags(z, false, false, true);
+                }
+                _ => {
+                    // CCF: complement carry. Clears N and H, leaves Z.
+                    let (z, c) = (self.regs.flag(FLAG_Z), self.regs.flag(FLAG_C));
+                    self.regs.set_flags(z, false, false, !c);
+                }
+            },
+        }
+    }
+
+    /// Set F from a flag byte produced by an `alu` function.
+    fn set_flags_byte(&mut self, f: u8) {
+        self.regs.set_flags(
+            f & FLAG_Z != 0,
+            f & FLAG_N != 0,
+            f & FLAG_H != 0,
+            f & FLAG_C != 0,
+        );
+    }
+
+    /// CB-prefixed instructions. The prefix byte is its own bus read (1 M-cycle), then the
+    /// opcode byte (1 M-cycle). `(HL)` operands add a read and, except for BIT, a write.
+    fn execute_cb(&mut self, bus: &mut Bus) {
+        let opcode = self.fetch(bus);
+        let x = opcode >> 6;
+        let y = (opcode >> 3) & 7;
+        let z = opcode & 7;
+        let v = self.get_r8(bus, z);
+        match x {
+            0 => {
+                let (r, c) = alu::rot_shift(y, v, self.regs.flag(FLAG_C));
+                self.set_r8(bus, z, r);
+                self.regs.set_flags(r == 0, false, false, c);
+            }
+            1 => {
+                // BIT y,r: Z = complement of the bit, N=0, H=1, C unchanged. No write-back.
+                let c = self.regs.flag(FLAG_C);
+                self.regs.set_flags(v & (1 << y) == 0, false, true, c);
+            }
+            2 => self.set_r8(bus, z, v & !(1 << y)), // RES
+            _ => self.set_r8(bus, z, v | (1 << y)),  // SET
         }
     }
 
@@ -483,13 +549,18 @@ impl Cpu {
                 let n = self.fetch(bus);
                 self.alu(y, n);
             }
-            _ => self.todo_lock(),
+            // CB prefix
+            (3, 1) => self.execute_cb(bus),
+            // DI is immediate; EI takes effect after the next instruction.
+            (3, 6) => {
+                self.ime = false;
+                self.ime_pending = false;
+            }
+            (3, 7) => self.ime_pending = true,
+            // The 11 unused opcodes (D3 DB DD E3 E4 EB EC ED F4 FC FD) hang real hardware.
+            // We stop executing instead of panicking.
+            _ => self.locked = true,
         }
-    }
-
-    /// Placeholder for instructions added in later tasks of phase 1.
-    fn todo_lock(&mut self) {
-        self.locked = true;
     }
 
     /// 8-bit ALU operation `y` on A (0..7 = ADD ADC SUB SBC AND XOR OR CP).
@@ -723,6 +794,116 @@ mod tests {
         cpu.regs.pc = 0xC003;
         assert_eq!(step_m(&mut cpu, &mut bus), 3, "CALL cc not taken");
         assert_eq!(cpu.regs.pc, 0xC006);
+    }
+
+    #[test]
+    fn cb_instructions_and_timing() {
+        // RLC B ; BIT 7,(HL) ; SET 0,(HL) ; SWAP A ; SRA C ; RLCA
+        let (mut cpu, mut bus) = setup(&[
+            0xCB, 0x00, 0xCB, 0x7E, 0xCB, 0xC6, 0xCB, 0x37, 0xCB, 0x29, 0x07,
+        ]);
+        cpu.regs.b = 0x80;
+        cpu.regs.set_hl(0xC000);
+        bus.write(0xC000, 0x80);
+        cpu.regs.a = 0xF1;
+        cpu.regs.c = 0x81;
+        assert_eq!(step_m(&mut cpu, &mut bus), 2);
+        assert_eq!(cpu.regs.b, 0x01);
+        assert_eq!(cpu.regs.f(), FLAG_C);
+        assert_eq!(step_m(&mut cpu, &mut bus), 3, "BIT (HL) is 3 M-cycles");
+        assert_eq!(cpu.regs.f(), FLAG_H | FLAG_C, "bit set -> Z clear, C kept");
+        assert_eq!(step_m(&mut cpu, &mut bus), 4, "SET (HL) is 4 M-cycles");
+        assert_eq!(bus.peek(0xC000), 0x81);
+        assert_eq!(step_m(&mut cpu, &mut bus), 2);
+        assert_eq!(cpu.regs.a, 0x1F);
+        assert_eq!(cpu.regs.f(), 0, "SWAP clears carry");
+        assert_eq!(step_m(&mut cpu, &mut bus), 2);
+        assert_eq!(cpu.regs.c, 0xC0, "SRA keeps the sign bit");
+        assert!(cpu.regs.flag(FLAG_C));
+        // RLCA on 0x00 must clear Z even though the result is zero (unlike CB RLC A).
+        cpu.regs.a = 0;
+        step_m(&mut cpu, &mut bus);
+        assert_eq!(cpu.regs.f(), 0);
+    }
+
+    #[test]
+    fn daa_after_bcd_add_and_sub() {
+        // 0x45 + 0x38 = 0x7D -> DAA -> 0x83 ; then 0x83 - 0x38 -> DAA
+        let (mut cpu, mut bus) = setup(&[0x80, 0x27, 0x90, 0x27]);
+        cpu.regs.a = 0x45;
+        cpu.regs.b = 0x38;
+        step_m(&mut cpu, &mut bus);
+        step_m(&mut cpu, &mut bus);
+        assert_eq!(cpu.regs.a, 0x83);
+        cpu.regs.b = 0x38;
+        step_m(&mut cpu, &mut bus);
+        step_m(&mut cpu, &mut bus);
+        assert_eq!(cpu.regs.a, 0x45);
+    }
+
+    #[test]
+    fn ei_takes_effect_after_next_instruction_and_di_cancels_it() {
+        // EI ; NOP ; NOP  with an interrupt already pending
+        let (mut cpu, mut bus) = setup(&[0xFB, 0x00, 0x00]);
+        bus.write(crate::bus::REG_IE, 0x01);
+        bus.write(crate::bus::REG_IF, 0x01);
+        cpu.regs.sp = 0xDFF0;
+        step_m(&mut cpu, &mut bus); // EI
+        assert_eq!(cpu.regs.pc, 0x0101);
+        step_m(&mut cpu, &mut bus); // NOP runs: not interruptible yet
+        assert_eq!(cpu.regs.pc, 0x0102);
+        assert_eq!(step_m(&mut cpu, &mut bus), 5, "dispatch takes 5 M-cycles");
+        assert_eq!(cpu.regs.pc, 0x0040);
+        assert_eq!((bus.peek(0xDFEF), bus.peek(0xDFEE)), (0x01, 0x02));
+        assert_eq!(bus.peek(crate::bus::REG_IF) & 1, 0, "IF bit cleared");
+
+        // EI ; DI ; NOP : never interrupted
+        let (mut cpu, mut bus) = setup(&[0xFB, 0xF3, 0x00]);
+        bus.write(crate::bus::REG_IE, 0x01);
+        bus.write(crate::bus::REG_IF, 0x01);
+        for _ in 0..3 {
+            step_m(&mut cpu, &mut bus);
+        }
+        assert_eq!(cpu.regs.pc, 0x0103);
+    }
+
+    #[test]
+    fn halt_waits_for_interrupt_and_halt_bug_repeats_byte() {
+        // HALT with IME=0 and nothing pending: stays halted, 1 M-cycle per step.
+        let (mut cpu, mut bus) = setup(&[0x76, 0x04]);
+        assert_eq!(step_m(&mut cpu, &mut bus), 1);
+        assert_eq!(step_m(&mut cpu, &mut bus), 1);
+        assert_eq!(cpu.regs.pc, 0x0101);
+        bus.write(crate::bus::REG_IE, 0x04);
+        bus.write(crate::bus::REG_IF, 0x04);
+        step_m(&mut cpu, &mut bus); // wakes (IME=0: no dispatch) and runs INC B
+        assert_eq!((cpu.regs.pc, cpu.regs.b), (0x0102, 0x01));
+
+        // HALT bug: IME=0 and an interrupt already pending -> INC B executes twice.
+        let (mut cpu, mut bus) = setup(&[0x76, 0x04, 0x00]);
+        bus.write(crate::bus::REG_IE, 0x04);
+        bus.write(crate::bus::REG_IF, 0x04);
+        let b0 = cpu.regs.b;
+        step_m(&mut cpu, &mut bus); // HALT (does not halt)
+        step_m(&mut cpu, &mut bus); // INC B, PC not incremented
+        assert_eq!(cpu.regs.pc, 0x0101);
+        step_m(&mut cpu, &mut bus); // INC B again
+        assert_eq!(cpu.regs.pc, 0x0102);
+        assert_eq!(cpu.regs.b, b0.wrapping_add(2));
+    }
+
+    #[test]
+    fn illegal_opcodes_lock_the_cpu_without_panicking() {
+        for op in [
+            0xD3u8, 0xDB, 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD,
+        ] {
+            let (mut cpu, mut bus) = setup(&[op, 0x3C]);
+            cpu.step(&mut bus);
+            assert!(cpu.is_locked(), "opcode {op:#04x}");
+            let a = cpu.regs.a;
+            cpu.step(&mut bus);
+            assert_eq!(cpu.regs.a, a, "a locked CPU executes nothing");
+        }
     }
 
     #[test]
