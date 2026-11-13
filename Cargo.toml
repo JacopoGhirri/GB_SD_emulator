@@ -15,3 +15,8 @@ publish = false
 [profile.release]
 # Emulator inner loops benefit from inlining across crates.
 codegen-units = 1
+
+[profile.test]
+# ROM tests and Doctor trace diffs execute tens of millions of instructions; unoptimised
+# builds make `cargo test` take minutes.
+opt-level = 3

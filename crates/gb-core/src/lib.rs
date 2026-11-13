@@ -66,6 +66,21 @@ impl GameBoy {
         self.cpu.regs.pc
     }
 
+    /// Gameboy Doctor trace line for the instruction about to execute.
+    pub fn trace_line(&self) -> String {
+        self.cpu.trace_line(&self.bus)
+    }
+
+    /// See [`Cpu::is_trace_point`].
+    pub fn is_trace_point(&self) -> bool {
+        self.cpu.is_trace_point()
+    }
+
+    /// Make LY read a constant 0x90, as Gameboy Doctor expects. For tracing only.
+    pub fn set_doctor_mode(&mut self, on: bool) {
+        self.bus.set_doctor_mode(on);
+    }
+
     /// Read-only view of the CPU, for tracing and tests.
     pub fn cpu(&self) -> &Cpu {
         &self.cpu

@@ -34,6 +34,9 @@ pub const REG_IF: u16 = 0xFF0F;
 pub const REG_IE: u16 = 0xFFFF;
 /// Serial transfer data and control (Pan Docs "Serial Data Transfer").
 pub const REG_SB: u16 = 0xFF01;
+/// Current scanline. Will belong to the PPU in phase 3.
+pub const REG_LY: u16 = 0xFF44;
+const DOCTOR_LY: u8 = 0x90;
 pub const REG_SC: u16 = 0xFF02;
 /// SC value that starts a transfer using the internal clock.
 const SC_START_INTERNAL_CLOCK: u8 = 0x81;
@@ -56,6 +59,10 @@ pub struct Bus {
     timer: Timer,
     /// Bytes the program "sent" over the serial port. Test ROMs print their verdict here.
     serial_out: Vec<u8>,
+    /// Gameboy Doctor mode, for tracing only. Doctor's reference logs were made by an emulator
+    /// where LY (0xFF44) always reads 0x90 (there is no PPU yet) and the unused upper bits of IF
+    /// read 0 instead of 1 (real hardware reads 1; normal mode does the same as hardware).
+    doctor_mode: bool,
 }
 
 impl Bus {
@@ -73,6 +80,7 @@ impl Bus {
             cycles: 0,
             timer: Timer::new(),
             serial_out: Vec::new(),
+            doctor_mode: false,
         }
     }
 
@@ -145,8 +153,11 @@ impl Bus {
     fn read_io(&self, addr: u16) -> u8 {
         match addr {
             // The upper three bits of IF are unused and read as 1.
+            // Doctor's reference emulator does not set the unused IF bits; real hardware does.
+            REG_IF if self.doctor_mode => self.interrupt_flag,
             REG_IF => self.interrupt_flag | !INTERRUPT_MASK,
             REG_DIV..=REG_TAC => self.timer.read(addr),
+            REG_LY if self.doctor_mode => DOCTOR_LY,
             _ => self.io[(addr - IO_START) as usize],
         }
     }
@@ -164,6 +175,11 @@ impl Bus {
             }
             _ => self.io[(addr - IO_START) as usize] = value,
         }
+    }
+
+    /// See the `doctor_mode` field.
+    pub fn set_doctor_mode(&mut self, on: bool) {
+        self.doctor_mode = on;
     }
 
     /// Bytes written to the serial port since the last call.

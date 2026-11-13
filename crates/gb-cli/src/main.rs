@@ -3,6 +3,7 @@
 
 mod image;
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -59,7 +60,7 @@ struct RunArgs {
     #[arg(long, value_name = "TEXT")]
     expect_serial: Option<String>,
 
-    /// Run until `ld b,b` and check the Mooneye Fibonacci signature. Needs the CPU (phase 1).
+    /// Run until `ld b,b` and check the Mooneye Fibonacci signature. Not implemented yet.
     #[arg(long)]
     mooneye: bool,
 
@@ -71,7 +72,8 @@ struct RunArgs {
     #[arg(long, value_name = "FILE")]
     compare: Option<PathBuf>,
 
-    /// Write a Gameboy Doctor trace, one line per instruction. Needs the CPU (phase 1).
+    /// Write a Gameboy Doctor trace, one line per instruction (needs --max-instructions).
+    /// Also makes LY read 0x90 and IF read without its unused bits, as Doctor expects.
     #[arg(long, value_name = "FILE")]
     trace: Option<PathBuf>,
 }
@@ -115,9 +117,13 @@ fn run(args: &RunArgs) -> u8 {
     };
     print_header(&cart);
 
-    // Features that need a working CPU fail loudly rather than printing fake data.
-    if args.mooneye || args.trace.is_some() {
-        eprintln!("error: --mooneye and --trace need the CPU, which is implemented in phase 1");
+    // Features that are not implemented fail loudly rather than printing fake data.
+    if args.mooneye {
+        eprintln!("error: --mooneye is not implemented yet (phase 2)");
+        return EXIT_UNSUPPORTED;
+    }
+    if args.trace.is_some() && args.max_instructions.is_none() {
+        eprintln!("error: --trace needs --max-instructions to know when to stop");
         return EXIT_UNSUPPORTED;
     }
 
@@ -128,6 +134,19 @@ fn run(args: &RunArgs) -> u8 {
         return EXIT_OK;
     }
 
+    let mut trace_out = match &args.trace {
+        Some(path) => match std::fs::File::create(path) {
+            Ok(file) => Some(std::io::BufWriter::new(file)),
+            Err(e) => {
+                eprintln!("error: cannot create {}: {e}", path.display());
+                return EXIT_FAILED;
+            }
+        },
+        None => None,
+    };
+    if trace_out.is_some() {
+        gb.set_doctor_mode(true);
+    }
     let mut serial = Vec::new();
     let mut instructions: u64 = 0;
 
@@ -139,9 +158,24 @@ fn run(args: &RunArgs) -> u8 {
     }
     if let Some(max) = args.max_instructions {
         while instructions < max {
+            if let Some(out) = trace_out.as_mut() {
+                if gb.is_trace_point() {
+                    if let Err(e) = writeln!(out, "{}", gb.trace_line()) {
+                        eprintln!("error: writing trace: {e}");
+                        return EXIT_FAILED;
+                    }
+                }
+            }
             gb.step();
             instructions += 1;
             serial.extend(gb.take_serial());
+        }
+    }
+
+    if let Some(out) = trace_out.as_mut() {
+        if let Err(e) = out.flush() {
+            eprintln!("error: writing trace: {e}");
+            return EXIT_FAILED;
         }
     }
 

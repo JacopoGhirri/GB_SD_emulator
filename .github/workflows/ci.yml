@@ -30,5 +30,8 @@ jobs:
       - name: Fetch test ROMs
         run: bash scripts/fetch_test_roms.sh
 
+      - name: Fetch Doctor logs
+        run: bash scripts/fetch_doctor_logs.sh
+
       - name: Test
         run: cargo test --workspace

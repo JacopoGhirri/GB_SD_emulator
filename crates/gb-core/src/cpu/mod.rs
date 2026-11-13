@@ -30,6 +30,8 @@ pub struct Cpu {
     halt_bug: bool,
     /// Set by an illegal opcode. Real hardware hangs; we stop executing instead of panicking.
     locked: bool,
+    /// True if the most recent `step` ran no instruction (interrupt dispatch or idle HALT cycle).
+    last_step_ran_no_instruction: bool,
 }
 
 impl Cpu {
@@ -42,7 +44,28 @@ impl Cpu {
             halted: false,
             halt_bug: false,
             locked: false,
+            last_step_ran_no_instruction: false,
         }
+    }
+
+    /// One line in Gameboy Doctor format: all registers, PC and the next four bytes
+    /// (https://github.com/robert/gameboy-doctor). Does not advance time.
+    pub fn trace_line(&self, bus: &Bus) -> String {
+        let r = &self.regs;
+        let pc = r.pc;
+        format!(
+            "A:{:02X} F:{:02X} B:{:02X} C:{:02X} D:{:02X} E:{:02X} H:{:02X} L:{:02X} SP:{:04X} PC:{:04X} PCMEM:{:02X},{:02X},{:02X},{:02X}",
+            r.a, r.f(), r.b, r.c, r.d, r.e, r.h, r.l, r.sp, pc,
+            bus.peek(pc), bus.peek(pc.wrapping_add(1)), bus.peek(pc.wrapping_add(2)), bus.peek(pc.wrapping_add(3)),
+        )
+    }
+
+    /// Whether the current state should get a trace line. Gameboy Doctor logs one line per
+    /// *instruction*: the state right after an interrupt dispatch (PC at the vector, before its
+    /// first instruction) and idle HALT cycles have no line of their own in its reference logs. The
+    /// state *after* the HALT instruction itself does get one line.
+    pub fn is_trace_point(&self) -> bool {
+        !self.last_step_ran_no_instruction && !self.locked
     }
 
     pub fn is_locked(&self) -> bool {
@@ -51,6 +74,7 @@ impl Cpu {
 
     /// Execute one instruction (or one idle HALT step). Returns the T-cycles elapsed.
     pub fn step(&mut self, bus: &mut Bus) -> u32 {
+        self.last_step_ran_no_instruction = false;
         let start = bus.cycles();
         self.step_inner(bus);
         (bus.cycles() - start) as u32
@@ -68,6 +92,7 @@ impl Cpu {
             // HALT ends as soon as any enabled interrupt is requested, even with IME=0.
             if bus.pending_interrupts() == 0 {
                 bus.idle();
+                self.last_step_ran_no_instruction = true;
                 return;
             }
             self.halted = false;
@@ -75,6 +100,7 @@ impl Cpu {
 
         if self.ime && bus.pending_interrupts() != 0 {
             self.dispatch_interrupt(bus);
+            self.last_step_ran_no_instruction = true;
             return;
         }
 

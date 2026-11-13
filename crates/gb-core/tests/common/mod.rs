@@ -67,6 +67,12 @@ pub fn rom_path(relative: &str) -> PathBuf {
 /// Panics only on a bug in the harness or the core, never on a missing or bad file:
 /// a file that exists but is not a valid ROM is reported as a test failure.
 pub fn run_rom(relative: &str, limits: Limits) -> Option<Outcome> {
+    run_rom_until(relative, limits, &[])
+}
+
+/// Like [`run_rom`], but also stops as soon as the serial output contains any of `stop_texts`
+/// (Blargg ROMs print "Passed" or "Failed" and then loop forever).
+pub fn run_rom_until(relative: &str, limits: Limits, stop_texts: &[&str]) -> Option<Outcome> {
     let path = rom_path(relative);
     let bytes = match fs::read(&path) {
         Ok(bytes) => bytes,
@@ -87,7 +93,14 @@ pub fn run_rom(relative: &str, limits: Limits) -> Option<Outcome> {
     while instructions < limits.max_instructions {
         gb.step();
         instructions += 1;
-        serial.extend(gb.take_serial());
+        let new = gb.take_serial();
+        if !new.is_empty() {
+            serial.extend(new);
+            let text = String::from_utf8_lossy(&serial);
+            if stop_texts.iter().any(|s| text.contains(s)) {
+                break;
+            }
+        }
     }
 
     Some(Outcome {
