@@ -176,3 +176,6 @@ When behaviour is wrong, in order:
 | 8 | `docs/phases/08-polish-accuracy.md` | Quality, packaging, accuracy scoreboard | Documented scoreboard + Deck package |
 
 Keep `PROGRESS.md` pointing at the current phase.
+
+## Commit Conventions
+Never add "Co-Authored-By" lines to commits. Do not include Claude attribution in commit messages, PR descriptions, or any git metadata.
