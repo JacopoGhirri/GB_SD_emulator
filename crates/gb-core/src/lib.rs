@@ -3,6 +3,7 @@
 //! Phase 0: this crate only has the public API shape and cartridge header parsing.
 //! No CPU, PPU, APU or timer exists yet, so `GameBoy` returns placeholder values.
 
+pub mod bus;
 pub mod cartridge;
 pub mod cpu;
 

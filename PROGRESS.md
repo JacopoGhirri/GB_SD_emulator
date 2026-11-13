@@ -1,12 +1,12 @@
 # PROGRESS
 
 **Current phase:** 1 — CPU (phase 0 gate met on 2026-11-13)
-**Last updated:** 2026-11-13
+**Last updated:** 2026-11-13 (phase 1 paused, see "Phase 1 status")
 
 ## Status by phase
 - [x] 0 Bootstrap
-- [ ] 1 CPU  ← current
-- [ ] 2 Bus, timer, cartridge
+- [ ] 1 CPU  ← current (paused: tasks 1-2 done; blocked by Smart App Control)
+- [ ] 2 Bus, timer, cartridge  (MUST replace the phase-1 minimal timer and minimal MBC1)
 - [ ] 3 PPU
 - [ ] 4 Frontend, input, saves
 - [ ] 5 Pokémon Red/Blue
@@ -96,3 +96,17 @@ compare FAILED: 21465 pixels differ from ...                                    
 
 ## Open questions for the human
 - None outstanding. Resolved 2026-11-13: commit `cb635f9` ("remove co authoring", three lines in `CLAUDE.md`) is intended and is left as is; PRs target `master`.
+
+## Phase 1 status (paused 2026-11-13)
+Done and committed: task 1 (registers, flags, DMG post-boot state; `c02279f`).
+Committed as partial: task 2 (`bus.rs` with tick-per-access, WRAM/HRAM/VRAM/OAM, IE/IF; `Mapper` trait with ROM-only and minimal MBC1 ROM banking). `cargo fmt` and `cargo clippy --workspace --all-targets -- -D warnings` pass. `cargo test -p gb-core --lib`: `test result: ok. 17 passed; 0 failed`.
+Not started: tasks 3-13 (fetch/decode, ALU, jumps, CB ops, interrupts, serial, minimal timer, Doctor trace, illegal opcodes, ROM tests).
+
+**Blocker:** Windows Smart App Control is on and blocks newly built test executables (`os error 4551`, "Un criterio di controllo dell'applicazione ha bloccato il file"), e.g. `harness_smoke` and the `gb-cli` unit tests, which ran in phase 0. The owner will install WSL and build/test there. No workaround attempted.
+The harness smoke test and gb-cli tests were therefore NOT re-run after task 2 (Cartridge no longer derives `Clone`; nothing in the workspace used it). Re-run `cargo test --workspace` first when resuming.
+
+## Phase 1 reminders
+- Phase 1 adds a **minimal timer** (DIV/TIMA/TMA/TAC, simple counter, overflow interrupt) because Blargg 02-interrupts needs it. **Phase 2 MUST REPLACE it with the accurate falling-edge implementation.**
+- Combined `cpu_instrs.gb` uses the minimal MBC1 (ROM banking only); phase 2 replaces it with the full mapper.
+- Doctor logs will be fetched by an extended `scripts/fetch_test_roms.sh` (pinned commit + SHA-256).
+- LY (0xFF44) has no PPU yet; if a Blargg ROM hangs waiting on it, add a stand-in and record it here.

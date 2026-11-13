@@ -1,8 +1,10 @@
-//! Cartridge: ROM image plus header parsing (Pan Docs "The Cartridge Header").
+//! Cartridge: ROM image, header parsing (Pan Docs "The Cartridge Header") and mapper dispatch.
 //!
-//! Phase 0 scope: parse and validate the header only. Mappers (MBC1/3/5) arrive in phase 2.
+//! Phase 1 scope: ROM-only and a minimal MBC1 (ROM banking only, no cartridge RAM) so that the
+//! combined Blargg `cpu_instrs.gb` boots. Full MBC1/3/5 with RAM and RTC arrive in phase 2.
 
 mod header;
+mod mbc1;
 
 pub use header::{CartridgeType, Header};
 
@@ -40,11 +42,46 @@ impl fmt::Display for CartridgeError {
 
 impl std::error::Error for CartridgeError {}
 
-/// A loaded ROM image with its parsed header.
-#[derive(Debug, Clone)]
+/// What a cartridge's memory-bank controller (MBC) must do (CLAUDE.md §4.3).
+/// The ROM bytes stay in [`Cartridge`]; the mapper only decides *which* byte an address means.
+pub trait Mapper: fmt::Debug {
+    /// Read from 0x0000..=0x7FFF.
+    fn read_rom(&self, rom: &[u8], addr: u16) -> u8;
+    /// A write to 0x0000..=0x7FFF does not change ROM; it programs the mapper's registers.
+    fn write_rom(&mut self, addr: u16, value: u8);
+    /// Read from 0xA000..=0xBFFF.
+    fn read_ram(&self, addr: u16) -> u8;
+    fn write_ram(&mut self, addr: u16, value: u8);
+    /// Battery-backed data to persist (empty if none).
+    fn save_data(&self) -> Vec<u8>;
+    fn load_save(&mut self, data: &[u8]);
+}
+
+/// No mapper: 32 KiB of ROM at 0x0000..=0x7FFF, no RAM.
+#[derive(Debug)]
+struct RomOnly;
+
+impl Mapper for RomOnly {
+    fn read_rom(&self, rom: &[u8], addr: u16) -> u8 {
+        rom.get(addr as usize).copied().unwrap_or(0xFF)
+    }
+    fn write_rom(&mut self, _addr: u16, _value: u8) {}
+    fn read_ram(&self, _addr: u16) -> u8 {
+        0xFF
+    }
+    fn write_ram(&mut self, _addr: u16, _value: u8) {}
+    fn save_data(&self) -> Vec<u8> {
+        Vec::new()
+    }
+    fn load_save(&mut self, _data: &[u8]) {}
+}
+
+/// A loaded ROM image with its parsed header and mapper.
+#[derive(Debug)]
 pub struct Cartridge {
     rom: Vec<u8>,
     header: Header,
+    mapper: Box<dyn Mapper>,
 }
 
 impl Cartridge {
@@ -52,7 +89,16 @@ impl Cartridge {
     /// A wrong header checksum is *not* an error; check [`Header::checksum_ok`].
     pub fn from_bytes(rom: Vec<u8>) -> Result<Cartridge, CartridgeError> {
         let header = Header::parse(&rom)?;
-        Ok(Cartridge { rom, header })
+        let mapper: Box<dyn Mapper> = match header.cart_type.0 {
+            0x01..=0x03 => Box::new(mbc1::Mbc1::new(rom.len())),
+            // Anything else is treated as ROM-only until phase 2 adds more mappers.
+            _ => Box::new(RomOnly),
+        };
+        Ok(Cartridge {
+            rom,
+            header,
+            mapper,
+        })
     }
 
     pub fn header(&self) -> &Header {
@@ -61,5 +107,24 @@ impl Cartridge {
 
     pub fn rom(&self) -> &[u8] {
         &self.rom
+    }
+
+    pub fn read_rom(&self, addr: u16) -> u8 {
+        self.mapper.read_rom(&self.rom, addr)
+    }
+    pub fn write_rom(&mut self, addr: u16, value: u8) {
+        self.mapper.write_rom(addr, value);
+    }
+    pub fn read_ram(&self, addr: u16) -> u8 {
+        self.mapper.read_ram(addr)
+    }
+    pub fn write_ram(&mut self, addr: u16, value: u8) {
+        self.mapper.write_ram(addr, value);
+    }
+    pub fn save_data(&self) -> Vec<u8> {
+        self.mapper.save_data()
+    }
+    pub fn load_save(&mut self, data: &[u8]) {
+        self.mapper.load_save(data);
     }
 }
