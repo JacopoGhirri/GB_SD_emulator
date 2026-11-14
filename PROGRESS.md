@@ -1,14 +1,14 @@
 # PROGRESS
 
-**Current phase:** 3 — all automated gate items met on 2026-11-14; awaiting owner's visual review (see "Phase 3" below) before phase 4
+**Current phase:** 4 — Frontend, input, saves (phase 3 gate fully met, owner reviewed screenshots 2026-11-14)
 **Last updated:** 2026-11-14
 
 ## Status by phase
 - [x] 0 Bootstrap
 - [x] 1 CPU  (gate met 2026-11-13, see "Phase 1 — CPU: gate status")
 - [x] 2 Bus, timer, cartridge  (gate met 2026-11-14, see "Phase 2" below)
-- [~] 3 PPU  (automated gate met 2026-11-14; human visual review pending, see "Phase 3" below)
-- [ ] 4 Frontend, input, saves
+- [x] 3 PPU  (gate met 2026-11-14, owner visual review done, see "Phase 3" below)
+- [~] 4 Frontend, input, saves  (in progress)
 - [ ] 5 Pokémon Red/Blue
 - [ ] 6 APU
 - [ ] 7 CGB
@@ -225,7 +225,7 @@ Environment as before (WSL Ubuntu, rustc 1.100.0).
 - [x] `dmg-acid2` matches the reference exactly via `gb-cli --compare` (first attempt after sprites landed).
 - [x] Mooneye `acceptance/ppu`: recorded below, 6 of 12 pass; no regression elsewhere.
 - [x] Blargg `instr_timing`, `mem_timing`, `mem_timing-2`, cpu_instrs, Doctor diffs and all phase-2 Mooneye groups still pass.
-- [ ] **Owner review of screenshots** (human gate item): see "Screenshots to review".
+- [x] **Owner review of screenshots** (human gate item, confirmed by owner 2026-11-14): see "Screenshots to review".
 - [x] `cargo test` includes acid2 as an automated screenshot test (`crates/gb-cli/tests/acid2.rs`, drives the real `gb-cli` binary).
 
 ```
