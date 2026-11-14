@@ -76,6 +76,8 @@ pub struct Ppu {
     /// True for the line after the LCD is switched on: it skips OAM scan and starts in mode 0
     /// (Pan Docs "LCD Control", bit 7 note; first frame after enabling differs from the rest).
     first_line_after_on: bool,
+    /// Last value of the shared STAT interrupt line (see `stat_line`).
+    stat_line: bool,
     frame_ready: bool,
     framebuffer: Vec<u32>,
 }
@@ -107,6 +109,7 @@ impl Ppu {
             dot: 0,
             off_dots: 0,
             first_line_after_on: false,
+            stat_line: false,
             frame_ready: false,
             framebuffer: vec![SHADES[0]; SCREEN_WIDTH * SCREEN_HEIGHT],
         }
@@ -133,6 +136,30 @@ impl Ppu {
         }
     }
 
+    /// The level of the internal STAT interrupt line: the OR of every enabled source
+    /// (Pan Docs "STAT" bits 3-6: HBlank, VBlank, OAM scan, LYC==LY). The CPU interrupt is
+    /// requested only on a *rising edge* of this OR ("STAT blocking"): while one source holds the
+    /// line high, other sources becoming true do not raise another interrupt.
+    fn stat_line_level(&self, enable: u8) -> bool {
+        if !self.lcd_on() {
+            return false;
+        }
+        let mode = self.mode();
+        (enable & 0x08 != 0 && mode == MODE_HBLANK)
+            || (enable & 0x10 != 0 && mode == MODE_VBLANK)
+            || (enable & 0x20 != 0 && mode == MODE_OAM_SCAN)
+            || (enable & 0x40 != 0 && self.ly == self.lyc)
+    }
+
+    /// Re-evaluate the STAT line after anything that can change it (a tick, or a write to
+    /// STAT, LYC or LCDC). Returns true on a rising edge.
+    fn update_stat_line(&mut self) -> bool {
+        let level = self.stat_line_level(self.stat_enable);
+        let rising = level && !self.stat_line;
+        self.stat_line = level;
+        rising
+    }
+
     pub fn ly(&self) -> u8 {
         self.ly
     }
@@ -156,6 +183,8 @@ impl Ppu {
                 self.off_dots -= DOTS_PER_FRAME;
                 self.frame_ready = true;
             }
+            // LCD off: every source is low.
+            self.stat_line = false;
             return irq;
         }
         self.dot += 4;
@@ -171,6 +200,7 @@ impl Ppu {
                 self.frame_ready = true;
             }
         }
+        irq.stat = self.update_stat_line();
         irq
     }
 
@@ -234,10 +264,21 @@ impl Ppu {
         }
     }
 
-    pub fn write_reg(&mut self, addr: u16, value: u8) {
+    /// Write an LCD register. Returns true if the write raised a STAT interrupt request.
+    pub fn write_reg(&mut self, addr: u16, value: u8) -> bool {
+        let mut spurious = false;
         match addr {
             REG_LCDC => self.write_lcdc(value),
-            REG_STAT => self.stat_enable = value & 0x78,
+            REG_STAT => {
+                // DMG STAT-write quirk (Pan Docs "STAT" / "Spurious STAT interrupts"): during
+                // the write, all four sources behave as enabled for a moment. If the line was low
+                // and any source condition is true (HBlank, VBlank or LYC==LY; OAM scan is not
+                // part of the quirk), an interrupt is requested even when the new value enables
+                // nothing. Some games depend on this (Pan Docs); we implement it on DMG.
+                let all_on = self.stat_line_level(0x78 & !0x20);
+                spurious = all_on && !self.stat_line;
+                self.stat_enable = value & 0x78;
+            }
             REG_SCY => self.scy = value,
             REG_SCX => self.scx = value,
             // LY is read-only.
@@ -250,6 +291,8 @@ impl Ppu {
             REG_WX => self.wx = value,
             _ => {}
         }
+        let rising = self.update_stat_line();
+        spurious || rising
     }
 
     fn write_lcdc(&mut self, value: u8) {
@@ -371,5 +414,62 @@ mod tests {
         assert_eq!(ppu.ly(), 0);
         ppu.write_reg(REG_STAT, 0xFF);
         assert_eq!(ppu.read_reg(REG_STAT) & 0xF8, 0xF8);
+    }
+
+    #[test]
+    fn lyc_interrupt_fires_once_when_ly_reaches_lyc() {
+        let mut ppu = fresh();
+        ppu.write_reg(REG_LYC, 2);
+        ppu.write_reg(REG_STAT, 0x40);
+        assert!(!ticks(&mut ppu, 2 * 456 / 4 - 1).stat);
+        assert!(ticks(&mut ppu, 1).stat, "LY 1 -> 2");
+        assert_eq!(ppu.read_reg(REG_STAT) & 0x04, 0x04, "coincidence flag");
+        assert!(
+            !ticks(&mut ppu, 456 / 4).stat,
+            "LY 3: line low again, no new edge"
+        );
+        assert_eq!(ppu.read_reg(REG_STAT) & 0x04, 0);
+    }
+
+    #[test]
+    fn stat_blocking_hblank_into_vblank_is_one_continuous_high_line() {
+        // HBlank and VBlank sources both enabled: the line goes high at the end of line 143's
+        // mode 3 and stays high through the HBlank -> VBlank change at line 144, so the VBlank
+        // source adds no second edge.
+        let mut ppu = fresh();
+        ppu.write_reg(REG_STAT, 0x18);
+        let mut edges = 0;
+        for _ in 0..(144 * 456 + 456) / 4 {
+            let irq = ppu.tick();
+            edges += u32::from(irq.stat);
+            if ppu.ly() == 144 && ppu.mode() == MODE_VBLANK && irq.vblank {
+                assert!(!irq.stat, "no new edge entering VBlank");
+            }
+        }
+        // 144 HBlanks (lines 0..=143) plus nothing for VBlank lines.
+        assert_eq!(edges, 144);
+    }
+
+    #[test]
+    fn stat_write_during_hblank_raises_spurious_interrupt_on_dmg() {
+        let mut ppu = fresh();
+        ticks(&mut ppu, 70); // dot 280: HBlank
+        assert_eq!(ppu.mode(), MODE_HBLANK);
+        assert!(ppu.write_reg(REG_STAT, 0x00), "spurious request");
+        // The enabled sources are all off afterwards, so the line never really rose: every such
+        // write during HBlank requests again (this matches the hardware bug).
+        assert!(ppu.write_reg(REG_STAT, 0x00));
+        // During OAM scan (mode 2) the quirk does not apply.
+        let mut ppu = fresh();
+        assert_eq!(ppu.mode(), MODE_OAM_SCAN);
+        assert!(!ppu.write_reg(REG_STAT, 0x00));
+    }
+
+    #[test]
+    fn no_stat_interrupt_while_lcd_is_off() {
+        let mut ppu = fresh();
+        ppu.write_reg(REG_STAT, 0x78);
+        ppu.write_reg(REG_LCDC, 0x11);
+        assert!(!ticks(&mut ppu, 2000).stat);
     }
 }

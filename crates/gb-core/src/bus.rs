@@ -216,7 +216,11 @@ impl Bus {
                 self.io[(addr - IO_START) as usize] = value;
                 self.dma.start(value);
             }
-            ppu::REG_LCDC..=ppu::REG_WX => self.ppu.write_reg(addr, value),
+            ppu::REG_LCDC..=ppu::REG_WX => {
+                if self.ppu.write_reg(addr, value) {
+                    self.request_interrupt(Interrupt::LcdStat);
+                }
+            }
             _ => self.io[(addr - IO_START) as usize] = value,
         }
     }
