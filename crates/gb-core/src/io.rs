@@ -8,8 +8,7 @@ pub const IO_START: u16 = 0xFF00;
 pub const IO_LEN: usize = 0x80;
 
 pub const REG_P1: u16 = 0xFF00;
-pub const REG_SB: u16 = 0xFF01;
-pub const REG_SC: u16 = 0xFF02;
+pub use crate::serial::{REG_SB, REG_SC};
 pub const REG_LCDC: u16 = 0xFF40;
 pub const REG_STAT: u16 = 0xFF41;
 pub const REG_LY: u16 = 0xFF44;

@@ -11,6 +11,7 @@ pub mod interrupts;
 pub mod io;
 pub mod joypad;
 pub mod mooneye;
+pub mod serial;
 pub mod timer;
 
 pub use bus::Bus;

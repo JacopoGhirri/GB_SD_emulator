@@ -8,8 +8,10 @@ use crate::cartridge::Cartridge;
 use crate::dma::Dma;
 use crate::interrupts::{Interrupt, Interrupts};
 use crate::io::{self, IO_LEN, IO_START};
-pub use crate::io::{REG_DMA, REG_LY, REG_P1, REG_SB, REG_SC};
+pub use crate::io::{REG_DMA, REG_LY, REG_P1};
 use crate::joypad::{Buttons, Joypad};
+use crate::serial::Serial;
+pub use crate::serial::{REG_SB, REG_SC};
 use crate::timer::{Timer, REG_DIV, REG_TAC};
 
 pub use crate::interrupts::{INTERRUPT_MASK, REG_IE, REG_IF};
@@ -40,8 +42,6 @@ const DOCTOR_LY: u8 = 0x90;
 /// T-cycles per scanline and scanlines per frame (Pan Docs "Rendering": 456 dots x 154 lines).
 const STUB_LINE_CYCLES: u64 = 456;
 const STUB_LINES: u64 = 154;
-/// SC value that starts a transfer using the internal clock.
-const SC_START_INTERNAL_CLOCK: u8 = 0x81;
 
 pub struct Bus {
     cartridge: Cartridge,
@@ -57,8 +57,7 @@ pub struct Bus {
     timer: Timer,
     dma: Dma,
     joypad: Joypad,
-    /// Bytes the program "sent" over the serial port. Test ROMs print their verdict here.
-    serial_out: Vec<u8>,
+    serial: Serial,
     /// Gameboy Doctor mode, for tracing only. Doctor's reference logs were made by an emulator
     /// where LY (0xFF44) always reads 0x90 (there is no PPU yet) and the unused upper bits of IF
     /// read 0 instead of 1 (real hardware reads 1; normal mode does the same as hardware).
@@ -83,7 +82,7 @@ impl Bus {
             timer: Timer::new(),
             dma: Dma::new(),
             joypad: Joypad::new(),
-            serial_out: Vec::new(),
+            serial: Serial::new(),
             doctor_mode: false,
             ly_stub: false,
         }
@@ -103,6 +102,9 @@ impl Bus {
         self.cycles += u64::from(T_CYCLES_PER_M_CYCLE);
         if self.timer.tick() {
             self.request_interrupt(Interrupt::Timer);
+        }
+        if self.serial.tick() {
+            self.request_interrupt(Interrupt::Serial);
         }
         if let Some((src, dst)) = self.dma.tick() {
             // The DMA reads the source directly, bypassing the CPU bus restriction.
@@ -187,6 +189,7 @@ impl Bus {
             REG_IF if self.doctor_mode => self.interrupts.flag_bits(),
             REG_IF => self.interrupts.read_flag(),
             REG_P1 => self.joypad.read(),
+            REG_SB | REG_SC => self.serial.read(addr),
             REG_DIV..=REG_TAC => self.timer.read(addr),
             REG_LY if self.doctor_mode => DOCTOR_LY,
             REG_LY if self.ly_stub => ((self.cycles / STUB_LINE_CYCLES) % STUB_LINES) as u8,
@@ -198,13 +201,7 @@ impl Bus {
         match addr {
             REG_IF => self.interrupts.write_flag(value),
             REG_DIV..=REG_TAC => self.timer.write(addr, value),
-            REG_SC => {
-                self.io[(addr - IO_START) as usize] = value;
-                // No link partner exists: capture the byte as soon as a transfer is started.
-                if value == SC_START_INTERNAL_CLOCK {
-                    self.serial_out.push(self.io[(REG_SB - IO_START) as usize]);
-                }
-            }
+            REG_SB | REG_SC => self.serial.write(addr, value),
             REG_P1 => {
                 if self.joypad.write(value) {
                     self.request_interrupt(Interrupt::Joypad);
@@ -237,7 +234,7 @@ impl Bus {
 
     /// Bytes written to the serial port since the last call.
     pub fn take_serial(&mut self) -> Vec<u8> {
-        std::mem::take(&mut self.serial_out)
+        self.serial.take_output()
     }
 
     /// Interrupts that are both enabled in IE and requested in IF.
