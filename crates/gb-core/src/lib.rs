@@ -94,8 +94,13 @@ impl GameBoy {
         &self.bus
     }
 
-    /// Run until a frame is complete. Placeholder: no-op.
-    pub fn run_frame(&mut self) {}
+    /// Run until the PPU finishes a frame (VBlank starts, or 70224 dots pass with the LCD off).
+    /// `framebuffer()` then holds that complete frame.
+    pub fn run_frame(&mut self) {
+        while !self.bus.ppu_mut().take_frame_ready() {
+            self.step();
+        }
+    }
 
     /// 160*144 pixels, 0x00RRGGBB.
     pub fn framebuffer(&self) -> &[u32] {
@@ -125,4 +130,30 @@ impl GameBoy {
 
     /// Append interleaved stereo f32 samples. Placeholder: appends nothing.
     pub fn drain_audio(&mut self, _out: &mut Vec<f32>) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 32 KiB ROM that spins in place: `JR -2` at 0x0100.
+    fn spinning_rom() -> Cartridge {
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x100] = 0x18;
+        rom[0x101] = 0xFE;
+        Cartridge::from_bytes(rom).unwrap()
+    }
+
+    #[test]
+    fn run_frame_advances_exactly_one_frame_of_dots() {
+        let mut gb = GameBoy::new(spinning_rom(), Model::Dmg);
+        gb.run_frame(); // first call: finishes the partial frame that was in progress
+        let start = gb.bus().cycles();
+        gb.run_frame();
+        let frame = gb.bus().cycles() - start;
+        assert!(
+            frame.abs_diff(70224) < 24,
+            "a frame is 70224 T-cycles, got {frame} (instruction granularity allows a few)"
+        );
+    }
 }
