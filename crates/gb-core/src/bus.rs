@@ -8,7 +8,8 @@ use crate::cartridge::Cartridge;
 use crate::dma::Dma;
 use crate::interrupts::{Interrupt, Interrupts};
 use crate::io::{self, IO_LEN, IO_START};
-pub use crate::io::{REG_DMA, REG_LY, REG_SB, REG_SC};
+pub use crate::io::{REG_DMA, REG_LY, REG_P1, REG_SB, REG_SC};
+use crate::joypad::{Buttons, Joypad};
 use crate::timer::{Timer, REG_DIV, REG_TAC};
 
 pub use crate::interrupts::{INTERRUPT_MASK, REG_IE, REG_IF};
@@ -55,6 +56,7 @@ pub struct Bus {
     cycles: u64,
     timer: Timer,
     dma: Dma,
+    joypad: Joypad,
     /// Bytes the program "sent" over the serial port. Test ROMs print their verdict here.
     serial_out: Vec<u8>,
     /// Gameboy Doctor mode, for tracing only. Doctor's reference logs were made by an emulator
@@ -80,6 +82,7 @@ impl Bus {
             cycles: 0,
             timer: Timer::new(),
             dma: Dma::new(),
+            joypad: Joypad::new(),
             serial_out: Vec::new(),
             doctor_mode: false,
             ly_stub: false,
@@ -183,6 +186,7 @@ impl Bus {
             // Doctor's reference emulator does not set the unused IF bits; real hardware does.
             REG_IF if self.doctor_mode => self.interrupts.flag_bits(),
             REG_IF => self.interrupts.read_flag(),
+            REG_P1 => self.joypad.read(),
             REG_DIV..=REG_TAC => self.timer.read(addr),
             REG_LY if self.doctor_mode => DOCTOR_LY,
             REG_LY if self.ly_stub => ((self.cycles / STUB_LINE_CYCLES) % STUB_LINES) as u8,
@@ -201,6 +205,11 @@ impl Bus {
                     self.serial_out.push(self.io[(REG_SB - IO_START) as usize]);
                 }
             }
+            REG_P1 => {
+                if self.joypad.write(value) {
+                    self.request_interrupt(Interrupt::Joypad);
+                }
+            }
             REG_DMA => {
                 self.io[(addr - IO_START) as usize] = value;
                 self.dma.start(value);
@@ -212,6 +221,13 @@ impl Bus {
     /// See the `doctor_mode` field.
     pub fn set_doctor_mode(&mut self, on: bool) {
         self.doctor_mode = on;
+    }
+
+    /// Update the held buttons; raises the joypad interrupt on a high-to-low transition.
+    pub fn set_buttons(&mut self, buttons: Buttons) {
+        if self.joypad.set_buttons(buttons) {
+            self.request_interrupt(Interrupt::Joypad);
+        }
     }
 
     /// See the `ly_stub` field. Remove when the PPU lands.

@@ -9,6 +9,7 @@ pub mod cpu;
 pub mod dma;
 pub mod interrupts;
 pub mod io;
+pub mod joypad;
 pub mod mooneye;
 pub mod timer;
 
@@ -23,9 +24,7 @@ pub enum Model {
     Cgb,
 }
 
-/// Joypad button state. Bit layout is a placeholder until the joypad phase.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Buttons(pub u8);
+pub use joypad::Buttons;
 
 /// Width and height of the LCD in pixels.
 pub const SCREEN_WIDTH: usize = 160;
@@ -108,7 +107,10 @@ impl GameBoy {
         &self.framebuffer
     }
 
-    pub fn set_buttons(&mut self, _buttons: Buttons) {}
+    /// Held buttons (bit set = pressed, see [`Buttons`] constants).
+    pub fn set_buttons(&mut self, buttons: Buttons) {
+        self.bus.set_buttons(buttons);
+    }
 
     /// Bytes written to the serial port since the last call.
     pub fn take_serial(&mut self) -> Vec<u8> {
