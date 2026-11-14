@@ -24,7 +24,7 @@ fn acceptance_timer() {
     sweep(&format!("{MOONEYE}/acceptance/timer"));
 }
 #[test]
-#[ignore = "phase 2 in progress: un-ignore when this area is implemented"]
+#[ignore = "sources-GS needs MBC5 cartridge RAM (task 7); basic, reg_read pass"]
 fn acceptance_oam_dma() {
     sweep(&format!("{MOONEYE}/acceptance/oam_dma"));
 }

@@ -5,9 +5,10 @@
 //! the accesses it makes. Internal delay cycles call [`Bus::idle`].
 
 use crate::cartridge::Cartridge;
+use crate::dma::Dma;
 use crate::interrupts::{Interrupt, Interrupts};
 use crate::io::{self, IO_LEN, IO_START};
-pub use crate::io::{REG_LY, REG_SB, REG_SC};
+pub use crate::io::{REG_DMA, REG_LY, REG_SB, REG_SC};
 use crate::timer::{Timer, REG_DIV, REG_TAC};
 
 pub use crate::interrupts::{INTERRUPT_MASK, REG_IE, REG_IF};
@@ -53,6 +54,7 @@ pub struct Bus {
     /// Total T-cycles since power-on.
     cycles: u64,
     timer: Timer,
+    dma: Dma,
     /// Bytes the program "sent" over the serial port. Test ROMs print their verdict here.
     serial_out: Vec<u8>,
     /// Gameboy Doctor mode, for tracing only. Doctor's reference logs were made by an emulator
@@ -77,6 +79,7 @@ impl Bus {
             interrupts: Interrupts::new(),
             cycles: 0,
             timer: Timer::new(),
+            dma: Dma::new(),
             serial_out: Vec::new(),
             doctor_mode: false,
             ly_stub: false,
@@ -98,6 +101,10 @@ impl Bus {
         if self.timer.tick() {
             self.request_interrupt(Interrupt::Timer);
         }
+        if let Some((src, dst)) = self.dma.tick() {
+            // The DMA reads the source directly, bypassing the CPU bus restriction.
+            self.oam[dst as usize] = self.peek(src);
+        }
     }
 
     /// An M-cycle in which the CPU does no memory access (internal delay).
@@ -115,15 +122,27 @@ impl Bus {
     ///   access-before-tick for both (this code): timer 13/13, Blargg pass.
     /// The two timing suites constrain reads and writes together, so change them together.
     pub fn read(&mut self, addr: u16) -> u8 {
-        let value = self.peek(addr);
+        let value = if self.cpu_blocked_by_dma(addr) {
+            0xFF
+        } else {
+            self.peek(addr)
+        };
         self.tick();
         value
     }
 
     /// CPU write: costs one M-cycle. The write lands before this M-cycle's tick (see `read`).
     pub fn write(&mut self, addr: u16, value: u8) {
-        self.poke(addr, value);
+        if !self.cpu_blocked_by_dma(addr) {
+            self.poke(addr, value);
+        }
         self.tick();
+    }
+
+    /// While OAM DMA runs the CPU can only reach HRAM and the I/O registers (including IE);
+    /// everything else reads 0xFF and ignores writes (Pan Docs "OAM DMA Transfer").
+    fn cpu_blocked_by_dma(&self, addr: u16) -> bool {
+        self.dma.is_active() && addr < IO_START
     }
 
     /// Read without advancing time. For tracing and debugging only.
@@ -181,6 +200,10 @@ impl Bus {
                 if value == SC_START_INTERNAL_CLOCK {
                     self.serial_out.push(self.io[(REG_SB - IO_START) as usize]);
                 }
+            }
+            REG_DMA => {
+                self.io[(addr - IO_START) as usize] = value;
+                self.dma.start(value);
             }
             _ => self.io[(addr - IO_START) as usize] = value,
         }
