@@ -461,6 +461,7 @@ mod tests {
         assert!(ppu.write_reg(REG_STAT, 0x00));
         // During OAM scan (mode 2) the quirk does not apply.
         let mut ppu = fresh();
+        ppu.write_reg(REG_LYC, 5); // LY (0) != LYC, so the LYC part of the quirk is quiet too
         assert_eq!(ppu.mode(), MODE_OAM_SCAN);
         assert!(!ppu.write_reg(REG_STAT, 0x00));
     }
