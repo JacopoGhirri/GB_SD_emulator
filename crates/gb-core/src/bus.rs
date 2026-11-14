@@ -95,7 +95,7 @@ impl Bus {
     /// Advance the whole system by one M-cycle (4 T-cycles).
     pub fn tick(&mut self) {
         self.cycles += u64::from(T_CYCLES_PER_M_CYCLE);
-        if self.timer.tick(T_CYCLES_PER_M_CYCLE) {
+        if self.timer.tick() {
             self.request_interrupt(Interrupt::Timer);
         }
     }
@@ -105,16 +105,25 @@ impl Bus {
         self.tick();
     }
 
-    /// CPU read: costs one M-cycle.
+    /// CPU read: costs one M-cycle. The access sees the state *before* this M-cycle's tick.
+    ///
+    /// Ordering decided by test ROMs, not by reasoning (2026-11-14): I ran Mooneye
+    /// `acceptance/timer/*` plus Blargg `instr_timing`/`mem_timing` with all four combinations of
+    /// "tick before / after the access" for reads and writes:
+    ///   tick-before for both (phase-1 design): timer 12/13 (rapid_toggle fails), Blargg pass.
+    ///   access-before for reads only, or for writes only: timer 5-6 fail and Blargg fail.
+    ///   access-before-tick for both (this code): timer 13/13, Blargg pass.
+    /// The two timing suites constrain reads and writes together, so change them together.
     pub fn read(&mut self, addr: u16) -> u8 {
+        let value = self.peek(addr);
         self.tick();
-        self.peek(addr)
+        value
     }
 
-    /// CPU write: costs one M-cycle.
+    /// CPU write: costs one M-cycle. The write lands before this M-cycle's tick (see `read`).
     pub fn write(&mut self, addr: u16, value: u8) {
-        self.tick();
         self.poke(addr, value);
+        self.tick();
     }
 
     /// Read without advancing time. For tracing and debugging only.
@@ -269,15 +278,17 @@ mod tests {
     #[test]
     fn timer_overflow_raises_interrupt_flag() {
         let mut bus = test_bus();
-        bus.write(REG_TAC, 0b101); // enabled, 16 T-cycles per TIMA tick
+        bus.write(REG_DIV, 0); // known counter phase
         bus.write(crate::timer::REG_TIMA, 0xFF);
-        // The TIMA write above already cost one M-cycle with the timer running, so 3 more
-        // M-cycles complete the 16 T-cycles; 2 are not enough.
-        for _ in 0..2 {
+        bus.write(REG_TAC, 0b101); // enabled, TIMA ticks every 4 M-cycles
+        let mut m_cycles = 0;
+        while bus.peek(REG_IF) & 0x04 == 0 {
             bus.idle();
+            m_cycles += 1;
+            assert!(m_cycles < 20, "timer interrupt never requested");
         }
-        assert_eq!(bus.peek(REG_IF) & 0x04, 0);
-        bus.idle(); // 16 T-cycles reached
-        assert_eq!(bus.peek(REG_IF) & 0x04, 0x04);
+        // Exact cycle counts are pinned by the timer unit tests and Mooneye; here we only check
+        // that the bus forwards the timer's interrupt request into IF.
+        assert!(m_cycles <= 8, "took {m_cycles} M-cycles");
     }
 }

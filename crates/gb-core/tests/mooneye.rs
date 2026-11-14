@@ -20,7 +20,6 @@ fn sweep(dir: &str) {
 const MOONEYE: &str = "mooneye-test-suite";
 
 #[test]
-#[ignore = "phase 2 in progress: un-ignore when this area is implemented"]
 fn acceptance_timer() {
     sweep(&format!("{MOONEYE}/acceptance/timer"));
 }
