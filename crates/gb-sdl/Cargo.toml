@@ -1,10 +1,13 @@
 [package]
 name = "gb-sdl"
-description = "Desktop / Steam Deck frontend. Empty until Phase 4 (SDL2 is added then)."
+description = "Desktop / Steam Deck frontend (SDL2 video, keyboard and gamepad input, battery saves)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
-# gb-core is added here in phase 4, when the frontend starts driving the emulator.
+gb-core = { path = "../gb-core" }
+# sdl2: window, texture, keyboard and GameController input (CLAUDE.md section 2 names it for this crate).
+# System libsdl2 is linked (no `bundled`).
+sdl2 = "0.37"
