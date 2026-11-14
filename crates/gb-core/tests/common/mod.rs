@@ -182,7 +182,7 @@ pub fn run_blargg_ram(relative: &str, max_instructions: u64) -> Option<(u8, Stri
     while n < max_instructions {
         gb.step();
         n += 1;
-        if n % 4096 == 0 {
+        if n.is_multiple_of(4096) {
             let b = gb.bus();
             if [0xDE, 0xB0, 0x61] == [b.peek(0xA001), b.peek(0xA002), b.peek(0xA003)] {
                 status = b.peek(0xA000);

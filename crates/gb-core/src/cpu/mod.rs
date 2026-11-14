@@ -259,11 +259,18 @@ impl Cpu {
         bus.idle();
         bus.idle();
         let pc = self.regs.pc;
-        self.push16(bus, pc);
+        // The vector is chosen *between* the two stack writes: the high byte of PC is pushed,
+        // then IE & IF is sampled, then the low byte is pushed. So a push that lands on IE
+        // (SP = 0x0000 for the high byte) can cancel the dispatch, while one that only hits IE
+        // with the low byte cannot (Mooneye `acceptance/interrupts/ie_push`).
+        self.regs.sp = self.regs.sp.wrapping_sub(1);
+        bus.write(self.regs.sp, (pc >> 8) as u8);
         // Priority: lowest bit number first (VBlank > STAT > Timer > Serial > Joypad).
         let pending = bus.pending_interrupts();
+        self.regs.sp = self.regs.sp.wrapping_sub(1);
+        bus.write(self.regs.sp, pc as u8);
         if pending == 0 {
-            // IE was changed by the push itself; hardware then jumps to 0x0000.
+            // Nothing is enabled any more: hardware jumps to 0x0000 and keeps IF untouched.
             self.regs.pc = 0;
         } else {
             let bit = pending.trailing_zeros() as u8;
