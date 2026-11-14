@@ -6,6 +6,7 @@
 pub mod bus;
 pub mod cartridge;
 pub mod cpu;
+pub mod mooneye;
 pub mod timer;
 
 pub use bus::Bus;
@@ -79,6 +80,11 @@ impl GameBoy {
     /// Make LY read a constant 0x90, as Gameboy Doctor expects. For tracing only.
     pub fn set_doctor_mode(&mut self, on: bool) {
         self.bus.set_doctor_mode(on);
+    }
+
+    /// Make LY read a constant 0x90 (no PPU yet). Used by the Mooneye runner; see `Bus`.
+    pub fn set_ly_stub(&mut self, on: bool) {
+        self.bus.set_ly_stub(on);
     }
 
     /// Read-only view of the CPU, for tracing and tests.

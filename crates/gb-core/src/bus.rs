@@ -37,6 +37,9 @@ pub const REG_SB: u16 = 0xFF01;
 /// Current scanline. Will belong to the PPU in phase 3.
 pub const REG_LY: u16 = 0xFF44;
 const DOCTOR_LY: u8 = 0x90;
+/// T-cycles per scanline and scanlines per frame (Pan Docs "Rendering": 456 dots x 154 lines).
+const STUB_LINE_CYCLES: u64 = 456;
+const STUB_LINES: u64 = 154;
 pub const REG_SC: u16 = 0xFF02;
 /// SC value that starts a transfer using the internal clock.
 const SC_START_INTERNAL_CLOCK: u8 = 0x81;
@@ -63,6 +66,10 @@ pub struct Bus {
     /// where LY (0xFF44) always reads 0x90 (there is no PPU yet) and the unused upper bits of IF
     /// read 0 instead of 1 (real hardware reads 1; normal mode does the same as hardware).
     doctor_mode: bool,
+    /// Temporary stand-in until the PPU exists (phase 3): LY free-runs from the cycle counter
+    /// (one line per 456 T-cycles, 154 lines). Mooneye ROMs busy-wait on LY values 0x8F/0x90 at
+    /// startup (found by tracing div_write.gb). No modes, STAT or interrupts. Test-only.
+    ly_stub: bool,
 }
 
 impl Bus {
@@ -81,6 +88,7 @@ impl Bus {
             timer: Timer::new(),
             serial_out: Vec::new(),
             doctor_mode: false,
+            ly_stub: false,
         }
     }
 
@@ -158,6 +166,7 @@ impl Bus {
             REG_IF => self.interrupt_flag | !INTERRUPT_MASK,
             REG_DIV..=REG_TAC => self.timer.read(addr),
             REG_LY if self.doctor_mode => DOCTOR_LY,
+            REG_LY if self.ly_stub => ((self.cycles / STUB_LINE_CYCLES) % STUB_LINES) as u8,
             _ => self.io[(addr - IO_START) as usize],
         }
     }
@@ -180,6 +189,11 @@ impl Bus {
     /// See the `doctor_mode` field.
     pub fn set_doctor_mode(&mut self, on: bool) {
         self.doctor_mode = on;
+    }
+
+    /// See the `ly_stub` field. Remove when the PPU lands.
+    pub fn set_ly_stub(&mut self, on: bool) {
+        self.ly_stub = on;
     }
 
     /// Bytes written to the serial port since the last call.

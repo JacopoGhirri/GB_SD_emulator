@@ -110,3 +110,52 @@ pub fn run_rom_until(relative: &str, limits: Limits, stop_texts: &[&str]) -> Opt
         instructions,
     })
 }
+
+/// Run one Mooneye ROM (path relative to [`ROM_ROOT`]) to its `LD B,B` verdict.
+/// `None` (after a SKIP line) if the ROM is absent.
+pub fn run_mooneye_rom(
+    relative: &str,
+    max_instructions: u64,
+) -> Option<(gb_core::mooneye::MooneyeVerdict, u64)> {
+    let path = rom_path(relative);
+    let bytes = fs::read(&path).ok()?;
+    let cart = Cartridge::from_bytes(bytes)
+        .unwrap_or_else(|e| panic!("{} is not a valid ROM: {e}", path.display()));
+    let mut gb = GameBoy::new(cart, Model::Dmg);
+    Some(gb_core::mooneye::run_mooneye(&mut gb, max_instructions))
+}
+
+/// Run every DMG-compatible `.gb` ROM directly inside `dir` (relative to [`ROM_ROOT`]) and
+/// return `(name, verdict text)` per ROM; ROMs for other hardware are listed as "skipped".
+/// Returns `None` with a SKIP line if the directory is absent.
+pub fn mooneye_sweep(dir: &str, max_instructions: u64) -> Option<Vec<(String, bool, String)>> {
+    let root = rom_path(dir);
+    let Ok(entries) = fs::read_dir(&root) else {
+        println!(
+            "SKIP: {} not found. Run scripts/fetch_test_roms.sh.",
+            root.display()
+        );
+        return None;
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|n| n.ends_with(".gb"))
+        .collect();
+    names.sort();
+    let mut out = Vec::new();
+    for name in names {
+        if !gb_core::mooneye::dmg_compatible(&name) {
+            println!("{dir}/{name}: skipped (other hardware)");
+            continue;
+        }
+        let (verdict, n) = run_mooneye_rom(&format!("{dir}/{name}"), max_instructions)?;
+        let pass = verdict == gb_core::mooneye::MooneyeVerdict::Pass;
+        let text = format!("{verdict:?} after {n} instructions");
+        println!(
+            "{dir}/{name}: {}  ({text})",
+            if pass { "PASS" } else { "FAIL" }
+        );
+        out.push((name, pass, text));
+    }
+    Some(out)
+}

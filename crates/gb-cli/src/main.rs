@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use gb_core::mooneye::{run_mooneye, MooneyeVerdict};
 use gb_core::{Cartridge, GameBoy, Model};
 
 /// Exit codes. Distinct values make failures easy to tell apart in scripts and CI.
@@ -60,7 +61,7 @@ struct RunArgs {
     #[arg(long, value_name = "TEXT")]
     expect_serial: Option<String>,
 
-    /// Run until `ld b,b` and check the Mooneye Fibonacci signature. Not implemented yet.
+    /// Run until `ld b,b` and check the Mooneye Fibonacci signature (needs --max-instructions).
     #[arg(long)]
     mooneye: bool,
 
@@ -118,16 +119,36 @@ fn run(args: &RunArgs) -> u8 {
     print_header(&cart);
 
     // Features that are not implemented fail loudly rather than printing fake data.
-    if args.mooneye {
-        eprintln!("error: --mooneye is not implemented yet (phase 2)");
-        return EXIT_UNSUPPORTED;
-    }
     if args.trace.is_some() && args.max_instructions.is_none() {
         eprintln!("error: --trace needs --max-instructions to know when to stop");
         return EXIT_UNSUPPORTED;
     }
 
     let mut gb = GameBoy::new(cart, args.model.into());
+    if args.mooneye {
+        let Some(max) = args.max_instructions else {
+            eprintln!("error: --mooneye needs --max-instructions as a time limit");
+            return EXIT_UNSUPPORTED;
+        };
+        let (verdict, n) = run_mooneye(&mut gb, max);
+        return match verdict {
+            MooneyeVerdict::Pass => {
+                println!("mooneye: PASS after {n} instructions");
+                EXIT_OK
+            }
+            MooneyeVerdict::Fail(regs) => {
+                eprintln!("mooneye: FAIL after {n} instructions, B,C,D,E,H,L = {regs:02X?}");
+                EXIT_FAILED
+            }
+            MooneyeVerdict::Timeout => {
+                eprintln!(
+                    "mooneye: TIMEOUT, no LD B,B within {n} instructions, PC=0x{:04X}",
+                    gb.pc()
+                );
+                EXIT_FAILED
+            }
+        };
+    }
     let needs_run = args.frames.is_some() || args.max_instructions.is_some();
     if !needs_run {
         // Header-only mode: no stop condition was given, so there is nothing to run.
