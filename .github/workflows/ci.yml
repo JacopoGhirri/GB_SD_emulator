@@ -11,6 +11,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # gb-sdl links the system SDL2 (phase 4).
+      - name: Install SDL2 development files
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+
       - name: Install stable Rust with rustfmt and clippy
         uses: dtolnay/rust-toolchain@stable
         with:
