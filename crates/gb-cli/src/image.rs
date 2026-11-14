@@ -17,13 +17,20 @@ pub fn to_rgb_bytes(pixels: &[u32]) -> Vec<u8> {
     out
 }
 
+/// Write the 160x144 screen.
 pub fn write_png(path: &Path, pixels: &[u32]) -> Result<(), String> {
+    write_png_sized(path, pixels, SCREEN_WIDTH, SCREEN_HEIGHT)
+}
+
+/// Write any `width` x `height` image of 0x00RRGGBB pixels (used by the VRAM dumps).
+pub fn write_png_sized(
+    path: &Path,
+    pixels: &[u32],
+    width: usize,
+    height: usize,
+) -> Result<(), String> {
     let file = File::create(path).map_err(|e| e.to_string())?;
-    let mut encoder = png::Encoder::new(
-        BufWriter::new(file),
-        SCREEN_WIDTH as u32,
-        SCREEN_HEIGHT as u32,
-    );
+    let mut encoder = png::Encoder::new(BufWriter::new(file), width as u32, height as u32);
     encoder.set_color(png::ColorType::Rgb);
     encoder.set_depth(png::BitDepth::Eight);
     let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
@@ -33,10 +40,13 @@ pub fn write_png(path: &Path, pixels: &[u32]) -> Result<(), String> {
 }
 
 /// Count pixels that differ between `pixels` and the reference PNG at `path`.
-/// Returns an error if the reference is not a 160x144 RGB or RGBA image.
+/// The reference may be RGB, RGBA, greyscale or greyscale+alpha (dmg-acid2's is 2-bit greyscale);
+/// low bit depths are expanded to 8 bits (2-bit: 0, 85, 170, 255 = $00, $55, $AA, $FF).
+/// Returns an error for other formats or sizes.
 pub fn compare_with_png(path: &Path, pixels: &[u32]) -> Result<usize, String> {
     let file = File::open(path).map_err(|e| e.to_string())?;
-    let decoder = png::Decoder::new(BufReader::new(file));
+    let mut decoder = png::Decoder::new(BufReader::new(file));
+    decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
     let mut buf = vec![0u8; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
@@ -47,16 +57,27 @@ pub fn compare_with_png(path: &Path, pixels: &[u32]) -> Result<usize, String> {
             info.width, info.height
         ));
     }
-    let channels = match info.color_type {
-        png::ColorType::Rgb => 3,
-        png::ColorType::Rgba => 4,
-        other => return Err(format!("unsupported reference colour type {other:?}")),
-    };
-    Ok(count_differences(
-        pixels,
-        &buf[..info.buffer_size()],
-        channels,
-    ))
+    if info.bit_depth != png::BitDepth::Eight {
+        return Err(format!("unsupported bit depth {:?}", info.bit_depth));
+    }
+    let data = &buf[..info.buffer_size()];
+    match info.color_type {
+        png::ColorType::Rgb => Ok(count_differences(pixels, data, 3)),
+        png::ColorType::Rgba => Ok(count_differences(pixels, data, 4)),
+        png::ColorType::Grayscale | png::ColorType::GrayscaleAlpha => {
+            let step = if info.color_type == png::ColorType::Grayscale {
+                1
+            } else {
+                2
+            };
+            let rgb: Vec<u8> = data
+                .chunks(step)
+                .flat_map(|px| [px[0], px[0], px[0]])
+                .collect();
+            Ok(count_differences(pixels, &rgb, 3))
+        }
+        other => Err(format!("unsupported reference colour type {other:?}")),
+    }
 }
 
 /// Compare 0x00RRGGBB pixels with interleaved RGB/RGBA bytes. Alpha is ignored.
@@ -87,6 +108,32 @@ mod tests {
         // RGBA reference: pixel 0 matches, pixel 1 differs in green, pixel 2 matches (alpha 0).
         let reference = [255, 0, 0, 255, 0, 1, 0, 255, 0, 0, 255, 0];
         assert_eq!(count_differences(&pixels, &reference, 4), 1);
+    }
+
+    #[test]
+    fn compares_against_a_2_bit_greyscale_png() {
+        // Round trip: write a 2-bit greyscale PNG with shades 0..3 and compare.
+        let dir = std::env::temp_dir().join(format!("gb-cli-grey-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("g.png");
+        let mut enc = png::Encoder::new(
+            BufWriter::new(File::create(&path).unwrap()),
+            SCREEN_WIDTH as u32,
+            SCREEN_HEIGHT as u32,
+        );
+        enc.set_color(png::ColorType::Grayscale);
+        enc.set_depth(png::BitDepth::Two);
+        let mut w = enc.write_header().unwrap();
+        // 160 px * 2 bits = 40 bytes per row; every pixel is shade index 1 (0b01).
+        w.write_image_data(&vec![0b0101_0101; 40 * SCREEN_HEIGHT])
+            .unwrap();
+        drop(w);
+        let same = vec![0x0055_5555; SCREEN_WIDTH * SCREEN_HEIGHT];
+        assert_eq!(compare_with_png(&path, &same).unwrap(), 0);
+        let mut other = same.clone();
+        other[0] = 0x00AA_AAAA;
+        assert_eq!(compare_with_png(&path, &other).unwrap(), 1);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -4,6 +4,8 @@
 //! The PPU is advanced by `Bus::tick`, 4 dots (T-cycles) per M-cycle. A frame is 154 lines of
 //! 456 dots = 70224 dots (~59.7 Hz). Lines 0..=143 are visible, 144..=153 are VBlank.
 
+pub mod debug;
+
 use crate::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 // LCD register addresses (Pan Docs "Hardware Registers", FF40-FF4B). DMA (FF46) lives in `dma`.
@@ -133,6 +135,14 @@ impl Ppu {
 
     pub fn ly(&self) -> u8 {
         self.ly
+    }
+
+    pub fn lcdc(&self) -> u8 {
+        self.lcdc
+    }
+
+    pub fn bgp(&self) -> u8 {
+        self.bgp
     }
 
     /// Advance by one M-cycle (4 dots).

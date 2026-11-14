@@ -73,6 +73,18 @@ struct RunArgs {
     #[arg(long, value_name = "FILE")]
     compare: Option<PathBuf>,
 
+    /// After running, write all 384 VRAM tiles (0x8000-0x97FF) as a PNG atlas, 16 tiles per row.
+    #[arg(long, value_name = "FILE")]
+    dump_tiles: Option<PathBuf>,
+
+    /// After running, write the background map at 0x9800 as a 256x256 PNG (no scrolling/window).
+    #[arg(long, value_name = "FILE")]
+    dump_bgmap_9800: Option<PathBuf>,
+
+    /// After running, write the background map at 0x9C00 as a 256x256 PNG (no scrolling/window).
+    #[arg(long, value_name = "FILE")]
+    dump_bgmap_9c00: Option<PathBuf>,
+
     /// Write a Gameboy Doctor trace, one line per instruction (needs --max-instructions).
     /// Also makes LY read 0x90 and IF read without its unused bits, as Doctor expects.
     #[arg(long, value_name = "FILE")]
@@ -230,6 +242,8 @@ fn run(args: &RunArgs) -> u8 {
         }
     }
 
+    status = status.max(dump_vram_views(args, &gb));
+
     if let Some(path) = &args.compare {
         match image::compare_with_png(path, gb.framebuffer()) {
             Ok(0) => println!("compare passed: final frame matches {}", path.display()),
@@ -247,6 +261,39 @@ fn run(args: &RunArgs) -> u8 {
         }
     }
 
+    status
+}
+
+/// Write the VRAM debug PNGs requested on the command line. Returns an exit status.
+fn dump_vram_views(args: &RunArgs, gb: &GameBoy) -> u8 {
+    use gb_core::ppu::debug::{self, ATLAS_HEIGHT, ATLAS_WIDTH, BG_MAP_SIZE};
+    let ppu = gb.bus().ppu();
+    // LCDC bit 4: 1 = unsigned tile ids from 0x8000, 0 = signed ids from 0x9000.
+    let unsigned = ppu.lcdc() & 0x10 != 0;
+    let bgp = ppu.bgp();
+    let mut status = EXIT_OK;
+    let mut write = |path: &PathBuf, pixels: Vec<u32>, w: usize, h: usize, what: &str| {
+        match image::write_png_sized(path, &pixels, w, h) {
+            Ok(()) => println!("{what} written to {}", path.display()),
+            Err(e) => {
+                eprintln!("error: writing {}: {e}", path.display());
+                status = EXIT_FAILED;
+            }
+        }
+    };
+    if let Some(path) = &args.dump_tiles {
+        let px = debug::tile_atlas(ppu.vram(), bgp);
+        write(path, px, ATLAS_WIDTH, ATLAS_HEIGHT, "tile atlas");
+    }
+    for (second, path) in [
+        (false, &args.dump_bgmap_9800),
+        (true, &args.dump_bgmap_9c00),
+    ] {
+        if let Some(path) = path {
+            let px = debug::bg_map(ppu.vram(), second, unsigned, bgp);
+            write(path, px, BG_MAP_SIZE, BG_MAP_SIZE, "background map");
+        }
+    }
     status
 }
 
