@@ -5,7 +5,10 @@
 //! the accesses it makes. Internal delay cycles call [`Bus::idle`].
 
 use crate::cartridge::Cartridge;
-use crate::timer::{Timer, REG_DIV, REG_TAC, TIMER_INTERRUPT_BIT};
+use crate::interrupts::{Interrupt, Interrupts};
+use crate::timer::{Timer, REG_DIV, REG_TAC};
+
+pub use crate::interrupts::{INTERRUPT_MASK, REG_IE, REG_IF};
 
 /// T-cycles per M-cycle. The CPU does one bus access per M-cycle.
 pub const T_CYCLES_PER_M_CYCLE: u32 = 4;
@@ -30,8 +33,6 @@ const HRAM_START: u16 = 0xFF80;
 const HRAM_END: u16 = 0xFFFE;
 
 // I/O registers.
-pub const REG_IF: u16 = 0xFF0F;
-pub const REG_IE: u16 = 0xFFFF;
 /// Serial transfer data and control (Pan Docs "Serial Data Transfer").
 pub const REG_SB: u16 = 0xFF01;
 /// Current scanline. Will belong to the PPU in phase 3.
@@ -44,9 +45,6 @@ pub const REG_SC: u16 = 0xFF02;
 /// SC value that starts a transfer using the internal clock.
 const SC_START_INTERNAL_CLOCK: u8 = 0x81;
 
-/// The five interrupt sources occupy bits 0..=4 of IE and IF (Pan Docs "Interrupts").
-pub const INTERRUPT_MASK: u8 = 0x1F;
-
 pub struct Bus {
     cartridge: Cartridge,
     vram: [u8; 0x2000],
@@ -55,8 +53,7 @@ pub struct Bus {
     hram: [u8; 0x7F],
     /// Plain storage for I/O registers that have no behaviour yet.
     io: [u8; 0x80],
-    interrupt_enable: u8,
-    interrupt_flag: u8,
+    interrupts: Interrupts,
     /// Total T-cycles since power-on.
     cycles: u64,
     timer: Timer,
@@ -81,9 +78,7 @@ impl Bus {
             oam: [0; 0xA0],
             hram: [0; 0x7F],
             io: [0; 0x80],
-            interrupt_enable: 0,
-            // Post-boot IF on DMG has VBlank pending (Pan Docs "Power-Up Sequence").
-            interrupt_flag: 0x01,
+            interrupts: Interrupts::new(),
             cycles: 0,
             timer: Timer::new(),
             serial_out: Vec::new(),
@@ -105,7 +100,7 @@ impl Bus {
     pub fn tick(&mut self) {
         self.cycles += u64::from(T_CYCLES_PER_M_CYCLE);
         if self.timer.tick(T_CYCLES_PER_M_CYCLE) {
-            self.request_interrupt(TIMER_INTERRUPT_BIT);
+            self.request_interrupt(Interrupt::Timer);
         }
     }
 
@@ -139,7 +134,7 @@ impl Bus {
             UNUSABLE_START..=UNUSABLE_END => 0xFF,
             IO_START..=IO_END => self.read_io(addr),
             HRAM_START..=HRAM_END => self.hram[(addr - HRAM_START) as usize],
-            REG_IE => self.interrupt_enable,
+            REG_IE => self.interrupts.read_enable(),
         }
     }
 
@@ -154,7 +149,7 @@ impl Bus {
             UNUSABLE_START..=UNUSABLE_END => {}
             IO_START..=IO_END => self.write_io(addr, value),
             HRAM_START..=HRAM_END => self.hram[(addr - HRAM_START) as usize] = value,
-            REG_IE => self.interrupt_enable = value,
+            REG_IE => self.interrupts.write_enable(value),
         }
     }
 
@@ -162,8 +157,8 @@ impl Bus {
         match addr {
             // The upper three bits of IF are unused and read as 1.
             // Doctor's reference emulator does not set the unused IF bits; real hardware does.
-            REG_IF if self.doctor_mode => self.interrupt_flag,
-            REG_IF => self.interrupt_flag | !INTERRUPT_MASK,
+            REG_IF if self.doctor_mode => self.interrupts.flag_bits(),
+            REG_IF => self.interrupts.read_flag(),
             REG_DIV..=REG_TAC => self.timer.read(addr),
             REG_LY if self.doctor_mode => DOCTOR_LY,
             REG_LY if self.ly_stub => ((self.cycles / STUB_LINE_CYCLES) % STUB_LINES) as u8,
@@ -173,7 +168,7 @@ impl Bus {
 
     fn write_io(&mut self, addr: u16, value: u8) {
         match addr {
-            REG_IF => self.interrupt_flag = value & INTERRUPT_MASK,
+            REG_IF => self.interrupts.write_flag(value),
             REG_DIV..=REG_TAC => self.timer.write(addr, value),
             REG_SC => {
                 self.io[(addr - IO_START) as usize] = value;
@@ -203,17 +198,17 @@ impl Bus {
 
     /// Interrupts that are both enabled in IE and requested in IF.
     pub fn pending_interrupts(&self) -> u8 {
-        self.interrupt_enable & self.interrupt_flag & INTERRUPT_MASK
+        self.interrupts.pending()
     }
 
     /// Clear one requested interrupt (bit index 0..=4) when the CPU starts servicing it.
     pub fn clear_interrupt(&mut self, bit: u8) {
-        self.interrupt_flag &= !(1 << bit);
+        self.interrupts.clear(bit);
     }
 
-    /// Raise an interrupt request (bit index 0..=4). Used by timer, PPU, serial, joypad.
-    pub fn request_interrupt(&mut self, bit: u8) {
-        self.interrupt_flag |= 1 << bit;
+    /// Raise an interrupt request. Used by timer, PPU, serial, joypad.
+    pub fn request_interrupt(&mut self, which: Interrupt) {
+        self.interrupts.request(which);
     }
 }
 
@@ -257,7 +252,7 @@ mod tests {
         bus.write(REG_IF, 0x00);
         assert_eq!(bus.peek(REG_IF), 0xE0, "unused IF bits read as 1");
         bus.write(REG_IE, 0x04);
-        bus.request_interrupt(2);
+        bus.request_interrupt(Interrupt::Timer);
         assert_eq!(bus.pending_interrupts(), 0x04);
         bus.clear_interrupt(2);
         assert_eq!(bus.pending_interrupts(), 0);

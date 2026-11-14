@@ -11,9 +11,6 @@ pub const REG_TIMA: u16 = 0xFF05;
 pub const REG_TMA: u16 = 0xFF06;
 pub const REG_TAC: u16 = 0xFF07;
 
-/// Interrupt bit for the timer in IE/IF.
-pub const TIMER_INTERRUPT_BIT: u8 = 2;
-
 const TAC_ENABLE: u8 = 0x04;
 
 #[derive(Debug, Clone, Default)]
