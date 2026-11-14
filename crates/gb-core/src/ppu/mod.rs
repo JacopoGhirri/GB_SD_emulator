@@ -160,6 +160,18 @@ impl Ppu {
         rising
     }
 
+    /// Whether the CPU can reach VRAM: not during mode 3 while the LCD is on
+    /// (Pan Docs "Accessing VRAM and OAM"). Blocked reads return 0xFF, blocked writes are lost.
+    pub fn vram_accessible(&self) -> bool {
+        self.mode() != MODE_DRAWING
+    }
+
+    /// Whether the CPU can reach OAM: not during modes 2 and 3 while the LCD is on.
+    /// (With the LCD off `mode()` is 0, so both are accessible.) OAM DMA is not subject to this.
+    pub fn oam_accessible(&self) -> bool {
+        !matches!(self.mode(), MODE_OAM_SCAN | MODE_DRAWING)
+    }
+
     pub fn ly(&self) -> u8 {
         self.ly
     }

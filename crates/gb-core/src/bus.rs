@@ -131,7 +131,7 @@ impl Bus {
     ///   access-before-tick for both (this code): timer 13/13, Blargg pass.
     /// The two timing suites constrain reads and writes together, so change them together.
     pub fn read(&mut self, addr: u16) -> u8 {
-        let value = if self.cpu_blocked_by_dma(addr) {
+        let value = if self.cpu_blocked_by_dma(addr) || self.cpu_blocked_by_ppu(addr) {
             0xFF
         } else {
             self.peek(addr)
@@ -142,7 +142,7 @@ impl Bus {
 
     /// CPU write: costs one M-cycle. The write lands before this M-cycle's tick (see `read`).
     pub fn write(&mut self, addr: u16, value: u8) {
-        if !self.cpu_blocked_by_dma(addr) {
+        if !self.cpu_blocked_by_dma(addr) && !self.cpu_blocked_by_ppu(addr) {
             self.poke(addr, value);
         }
         self.tick();
@@ -152,6 +152,15 @@ impl Bus {
     /// everything else reads 0xFF and ignores writes (Pan Docs "OAM DMA Transfer").
     fn cpu_blocked_by_dma(&self, addr: u16) -> bool {
         self.dma.is_active() && addr < IO_START
+    }
+
+    /// VRAM is locked to the CPU in mode 3, OAM in modes 2 and 3 (only while the LCD is on).
+    fn cpu_blocked_by_ppu(&self, addr: u16) -> bool {
+        match addr {
+            VRAM_START..=VRAM_END => !self.ppu.vram_accessible(),
+            OAM_START..=OAM_END => !self.ppu.oam_accessible(),
+            _ => false,
+        }
     }
 
     /// Read without advancing time. For tracing and debugging only.
@@ -287,6 +296,34 @@ mod tests {
         assert_eq!(bus.cycles(), 12);
         bus.peek(0x0000);
         assert_eq!(bus.cycles(), 12, "peek must not advance time");
+    }
+
+    #[test]
+    fn vram_and_oam_are_locked_by_ppu_mode() {
+        let mut bus = test_bus();
+        // Post-boot the PPU sits at line 0 dot 0 (mode 2): OAM locked, VRAM open.
+        bus.write(0x8000, 0x12);
+        assert_eq!(bus.peek(0x8000), 0x12);
+        bus.write(0xFE00, 0x34);
+        assert_eq!(bus.peek(0xFE00), 0x00, "OAM write ignored in mode 2");
+        assert_eq!(bus.read(0xFE00), 0xFF);
+        while bus.ppu().mode() != 3 {
+            bus.idle();
+        }
+        assert_eq!(bus.read(0x8000), 0xFF, "VRAM reads 0xFF in mode 3");
+        bus.write(0x8000, 0x99);
+        assert_eq!(bus.peek(0x8000), 0x12, "VRAM write ignored in mode 3");
+        while bus.ppu().mode() != 0 {
+            bus.idle();
+        }
+        assert_eq!(bus.read(0x8000), 0x12);
+        bus.write(0xFE00, 0x56);
+        assert_eq!(bus.peek(0xFE00), 0x56);
+        // LCD off: everything open at any time.
+        bus.write(ppu::REG_LCDC, 0x11);
+        bus.idle();
+        bus.write(0xFE01, 0x77);
+        assert_eq!(bus.read(0xFE01), 0x77);
     }
 
     #[test]
