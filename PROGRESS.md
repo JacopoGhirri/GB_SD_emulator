@@ -89,7 +89,7 @@ compare FAILED: 21465 pixels differ from ...                                    
 - **Commit granularity:** the workspace, the `gb-core` header parser and the `gb-cli` runner were committed together (`45d8004`), because each crate needs the others to compile.
 
 ## Known issues
-- **CI has not run.** `.github/workflows/ci.yml` is written but not executed. No YAML parser is installed on this machine (no Python, Ruby or Perl YAML module), so the file is only checked by reading it. The first push to GitHub is the real test. The steps mirror the local commands above.
+- **CI:** the owner confirmed on 2026-11-14 that CI runs OK on GitHub (includes the Doctor-log fetch step).
 - **`cargo test` output hides SKIP lines** unless run with `-- --nocapture`. The harness prints them to stdout, which the test runner captures for passing tests.
 - The "stopped after N instructions" line also appears for frame-only runs, where it reads 0 instructions. Cosmetic only.
 - The SKIP path shows a mixed `\` and `/` path on Windows. Cosmetic only.
@@ -164,10 +164,9 @@ Note: each Blargg ROM was first run through `gb-cli` and passed on the first att
 - **LY stand-in was not needed**: Blargg cpu_instrs does not wait on LY, so no fake LY exists outside doctor mode.
 
 ### Phase 1 known issues
-- `unzip` is not installed in this WSL distro, so `scripts/fetch_*.sh` were run from Git Bash on Windows (the tree is shared). CI (ubuntu) has `unzip`.
+- `unzip` is now installed in WSL (owner, 2026-11-14), so the fetch scripts run there too. Earlier fetches were run from Git Bash.
 - `--mooneye` is still unimplemented (exit 2); it belongs to phase 2's gate.
 - `halt_bug` ROM and the other Blargg suites (`instr_timing`, `mem_timing`, `halt_bug`) have not been run; they are phase 2 gates. Only the HALT-bug unit test exists.
-- CI (`.github/workflows/ci.yml`) has still never run on GitHub.
 
 ## Phase 2 reminders
 - [ ] **Replace the phase-1 minimal timer with the accurate falling-edge implementation.**
