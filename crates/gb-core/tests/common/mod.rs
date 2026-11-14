@@ -159,3 +159,43 @@ pub fn mooneye_sweep(dir: &str, max_instructions: u64) -> Option<Vec<(String, bo
     }
     Some(out)
 }
+
+/// Newer Blargg ROMs (e.g. `mem_timing-2`) report through cartridge RAM instead of the serial
+/// port: 0xA001..=0xA003 hold the signature DE B0 61, 0xA000 holds the status (0x80 = still
+/// running, 0x00 = passed, anything else = failure code) and 0xA004.. a NUL-terminated text.
+/// Runs until a finished status appears; returns `(status, text, instructions)`.
+/// `None` (after a SKIP line) if the ROM is absent. `status == 0x80` means it never finished.
+pub fn run_blargg_ram(relative: &str, max_instructions: u64) -> Option<(u8, String, u64)> {
+    let path = rom_path(relative);
+    let Ok(bytes) = fs::read(&path) else {
+        println!(
+            "SKIP: {} not found. Run scripts/fetch_test_roms.sh.",
+            path.display()
+        );
+        return None;
+    };
+    let cart = Cartridge::from_bytes(bytes)
+        .unwrap_or_else(|e| panic!("{} is not a valid ROM: {e}", path.display()));
+    let mut gb = GameBoy::new(cart, Model::Dmg);
+    let mut n = 0u64;
+    let mut status = 0x80;
+    while n < max_instructions {
+        gb.step();
+        n += 1;
+        if n % 4096 == 0 {
+            let b = gb.bus();
+            if [0xDE, 0xB0, 0x61] == [b.peek(0xA001), b.peek(0xA002), b.peek(0xA003)] {
+                status = b.peek(0xA000);
+                if status != 0x80 {
+                    break;
+                }
+            }
+        }
+    }
+    let b = gb.bus();
+    let text: Vec<u8> = (0xA004u16..0xA104)
+        .map(|a| b.peek(a))
+        .take_while(|&c| c != 0)
+        .collect();
+    Some((status, String::from_utf8_lossy(&text).into_owned(), n))
+}

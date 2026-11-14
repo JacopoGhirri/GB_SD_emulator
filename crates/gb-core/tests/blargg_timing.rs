@@ -31,7 +31,19 @@ fn mem_timing() {
     expect_passed("blargg/mem_timing/mem_timing.gb");
 }
 #[test]
-#[ignore = "phase 2 in progress: needs the full MBC (task 7)"]
 fn mem_timing_2() {
-    expect_passed("blargg/mem_timing-2/mem_timing.gb");
+    let Some((status, text, n)) =
+        common::run_blargg_ram("blargg/mem_timing-2/mem_timing.gb", BUDGET)
+    else {
+        return;
+    };
+    println!(
+        "mem_timing-2: status {status:#04X} after {n} instructions
+{text}"
+    );
+    assert_eq!(
+        status, 0,
+        "mem_timing-2 failed:
+{text}"
+    );
 }
