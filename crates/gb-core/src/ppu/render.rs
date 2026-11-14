@@ -10,6 +10,8 @@ use super::{Ppu, SCREEN_WIDTH};
 
 // LCDC bits (Pan Docs "LCD Control").
 const LCDC_BG_WINDOW_ENABLE: u8 = 0x01;
+const LCDC_SPRITES_ENABLE: u8 = 0x02;
+const LCDC_SPRITE_SIZE_16: u8 = 0x04;
 const LCDC_BG_MAP_SELECT: u8 = 0x08;
 const LCDC_TILE_DATA_UNSIGNED: u8 = 0x10;
 const LCDC_WINDOW_ENABLE: u8 = 0x20;
@@ -18,6 +20,20 @@ const LCDC_WINDOW_MAP_SELECT: u8 = 0x40;
 /// Offsets inside VRAM of the two 32x32 tile maps (0x9800 and 0x9C00).
 const MAP0_OFFSET: usize = 0x1800;
 const MAP1_OFFSET: usize = 0x1C00;
+
+// OAM entry: 4 bytes per sprite, 40 sprites (Pan Docs "Object Attribute Memory").
+const OAM_ENTRY_BYTES: usize = 4;
+const SPRITE_COUNT: usize = 40;
+/// Hardware draws at most 10 sprites per scanline: the first 10 found in OAM order.
+const MAX_SPRITES_PER_LINE: usize = 10;
+/// OAM Y is the sprite's top edge + 16, OAM X its left edge + 8 (so 0 hides it off-screen).
+const SPRITE_Y_OFFSET: i32 = 16;
+const SPRITE_X_OFFSET: i32 = 8;
+// Sprite attribute bits.
+const ATTR_BG_OVER_OBJ: u8 = 0x80;
+const ATTR_Y_FLIP: u8 = 0x40;
+const ATTR_X_FLIP: u8 = 0x20;
+const ATTR_PALETTE_OBP1: u8 = 0x10;
 
 /// The window's top-left corner is at screen x = WX - 7 (Pan Docs "Window").
 const WINDOW_X_OFFSET: i32 = 7;
@@ -69,9 +85,80 @@ impl Ppu {
             }
         }
 
-        let row = &mut self.back[y * SCREEN_WIDTH..(y + 1) * SCREEN_WIDTH];
-        for (px, &idx) in row.iter_mut().zip(bg_index.iter()) {
+        let mut shades = [0u32; SCREEN_WIDTH];
+        for (px, &idx) in shades.iter_mut().zip(bg_index.iter()) {
             *px = shade(self.bgp, idx);
+        }
+        if self.lcdc & LCDC_SPRITES_ENABLE != 0 {
+            self.draw_sprites(y as i32, &bg_index, &mut shades);
+        }
+        self.back[y * SCREEN_WIDTH..(y + 1) * SCREEN_WIDTH].copy_from_slice(&shades);
+    }
+
+    /// Overlay the sprites that touch line `y` onto `shades`.
+    ///
+    /// OAM scan: the first 10 sprites (in OAM order) whose vertical range covers the line are
+    /// selected, whether or not they are visible horizontally. Priority on DMG (Pan Docs
+    /// "OBJ Priority"): the sprite with the smaller X wins; equal X: the earlier OAM entry wins.
+    /// Colour index 0 is transparent. The sprite's BG-over-OBJ flag lets BG colours 1-3 cover it.
+    fn draw_sprites(
+        &self,
+        y: i32,
+        bg_index: &[u8; SCREEN_WIDTH],
+        shades: &mut [u32; SCREEN_WIDTH],
+    ) {
+        let height = if self.lcdc & LCDC_SPRITE_SIZE_16 != 0 {
+            16
+        } else {
+            8
+        };
+        // (x, oam index, top y, tile, attributes)
+        let mut selected: Vec<(i32, usize, i32, u8, u8)> = Vec::with_capacity(MAX_SPRITES_PER_LINE);
+        for i in 0..SPRITE_COUNT {
+            let e = &self.oam[i * OAM_ENTRY_BYTES..(i + 1) * OAM_ENTRY_BYTES];
+            let top = i32::from(e[0]) - SPRITE_Y_OFFSET;
+            if y >= top && y < top + height {
+                selected.push((i32::from(e[1]) - SPRITE_X_OFFSET, i, top, e[2], e[3]));
+                if selected.len() == MAX_SPRITES_PER_LINE {
+                    break;
+                }
+            }
+        }
+        // Stable order by X then OAM index; the first opaque sprite pixel found wins.
+        selected.sort_by_key(|&(x, i, ..)| (x, i));
+
+        for (sx, slot) in shades.iter_mut().enumerate() {
+            for &(x, _, top, tile, attr) in &selected {
+                let col = sx as i32 - x;
+                if !(0..8).contains(&col) {
+                    continue;
+                }
+                let mut row = (y - top) as usize;
+                if attr & ATTR_Y_FLIP != 0 {
+                    row = height as usize - 1 - row;
+                }
+                let col = if attr & ATTR_X_FLIP != 0 {
+                    7 - col
+                } else {
+                    col
+                } as usize;
+                // In 8x16 mode bit 0 of the tile number is ignored: the sprite is tile N&0xFE
+                // on top and N|1 below, and row 8..15 simply continues into the next tile.
+                let tile = if height == 16 { tile & 0xFE } else { tile };
+                let idx = tile_pixel(&self.vram, usize::from(tile) * 16, col, row);
+                if idx == 0 {
+                    continue; // transparent: look at the next sprite
+                }
+                if attr & ATTR_BG_OVER_OBJ == 0 || bg_index[sx] == 0 {
+                    let palette = if attr & ATTR_PALETTE_OBP1 != 0 {
+                        self.obp1
+                    } else {
+                        self.obp0
+                    };
+                    *slot = shade(palette, idx);
+                }
+                break; // this opaque pixel decided the winner, hidden or not
+            }
         }
     }
 
@@ -244,5 +331,152 @@ mod tests {
             SHADES[1],
             "resumes with window row 8 (tile row 1), not row 11"
         );
+    }
+
+    // --- sprites ---
+
+    /// Put sprite `n` (OAM index) at screen (x, y) top-left; (x, y) may be off-screen.
+    fn set_sprite(p: &mut Ppu, n: usize, x: i32, y: i32, tile: u8, attr: u8) {
+        p.oam[n * 4] = (y + 16) as u8;
+        p.oam[n * 4 + 1] = (x + 8) as u8;
+        p.oam[n * 4 + 2] = tile;
+        p.oam[n * 4 + 3] = attr;
+    }
+
+    fn sprite_ppu() -> Ppu {
+        let mut p = ppu();
+        p.lcdc |= LCDC_SPRITES_ENABLE;
+        p.obp0 = 0xE4;
+        p.obp1 = 0xE4;
+        set_tile(&mut p, 1, [0, 1, 2, 3, 3, 2, 1, 0]);
+        p
+    }
+
+    #[test]
+    fn sprite_draws_with_transparent_colour_0() {
+        let mut p = sprite_ppu();
+        set_sprite(&mut p, 0, 10, 0, 1, 0);
+        let l = line(&mut p, 0);
+        assert_eq!(l[10], SHADES[0], "index 0 is transparent: BG shows");
+        assert_eq!(l[11], SHADES[1]);
+        assert_eq!(l[13], SHADES[3]);
+        assert_eq!(l[18], SHADES[0]);
+    }
+
+    #[test]
+    fn sprite_flips_and_palette() {
+        let mut p = sprite_ppu();
+        p.obp1 = 0b00_01_10_11; // reverse mapping
+        set_sprite(&mut p, 0, 0, 0, 1, ATTR_X_FLIP | ATTR_PALETTE_OBP1);
+        let l = line(&mut p, 0);
+        // X-flipped row: 0,1,2,3,3,2,1,0 reversed is the same (symmetric) so use pixel 1:
+        assert_eq!(l[1], shade(p.obp1, 1));
+        // Y flip: tile row 0 solid, other rows 0.
+        let mut p = sprite_ppu();
+        p.vram[32] = 0xFF;
+        p.vram[33] = 0xFF;
+        set_sprite(&mut p, 0, 0, 0, 2, ATTR_Y_FLIP);
+        assert_eq!(line(&mut p, 0)[0], SHADES[0], "row 0 shows tile row 7");
+        assert_eq!(line(&mut p, 7)[0], SHADES[3], "row 7 shows tile row 0");
+    }
+
+    #[test]
+    fn sprite_partially_off_screen_left_and_hidden_at_x_0() {
+        let mut p = sprite_ppu();
+        set_sprite(&mut p, 0, -4, 0, 1, 0); // OAM X = 4: columns 4..7 visible at x 0..3
+        let l = line(&mut p, 0);
+        assert_eq!(l[0], SHADES[3]);
+        assert_eq!(l[2], SHADES[1]);
+        let mut p = sprite_ppu();
+        set_sprite(&mut p, 0, -8, 0, 1, 0); // OAM X = 0: fully hidden
+        assert!(line(&mut p, 0).iter().all(|&c| c == SHADES[0]));
+    }
+
+    #[test]
+    fn bg_over_obj_only_hides_sprite_behind_nonzero_bg() {
+        let mut p = sprite_ppu();
+        set_tile(&mut p, 2, [0, 3, 0, 3, 0, 3, 0, 3]);
+        p.vram[0x1800] = 2;
+        set_sprite(&mut p, 0, 0, 0, 1, ATTR_BG_OVER_OBJ);
+        let l = line(&mut p, 0);
+        assert_eq!(l[1], SHADES[3], "BG index 3 covers the sprite");
+        assert_eq!(l[2], SHADES[2], "BG index 0: sprite shows (tile index 2)");
+    }
+
+    #[test]
+    fn lower_x_wins_then_lower_oam_index() {
+        let mut p = sprite_ppu();
+        set_tile(&mut p, 2, [3; 8]);
+        // OAM 0 at x=4 shows tile 1 (index 1 at col 4..). OAM 1 at x=2 is solid index 3.
+        set_sprite(&mut p, 0, 4, 0, 1, 0);
+        set_sprite(&mut p, 1, 2, 0, 2, 0);
+        assert_eq!(
+            line(&mut p, 0)[5],
+            SHADES[3],
+            "smaller X wins even with larger OAM index"
+        );
+        // Equal X: earlier OAM entry wins.
+        let mut p = sprite_ppu();
+        set_tile(&mut p, 2, [2; 8]);
+        set_sprite(&mut p, 0, 0, 0, 2, 0);
+        set_sprite(&mut p, 1, 0, 0, 1, 0);
+        assert_eq!(line(&mut p, 0)[3], SHADES[2]);
+    }
+
+    #[test]
+    fn transparent_pixel_of_the_winner_lets_the_next_sprite_show() {
+        let mut p = sprite_ppu();
+        set_tile(&mut p, 2, [2; 8]);
+        set_sprite(&mut p, 0, 0, 0, 1, 0); // pixel 0 is transparent
+        set_sprite(&mut p, 1, 0, 0, 2, 0);
+        assert_eq!(line(&mut p, 0)[0], SHADES[2]);
+    }
+
+    #[test]
+    fn only_first_10_sprites_in_oam_order_are_drawn_per_line() {
+        let mut p = sprite_ppu();
+        set_tile(&mut p, 2, [3; 8]);
+        for n in 0..11 {
+            set_sprite(&mut p, n, (n * 9) as i32, 0, 2, 0);
+        }
+        let l = line(&mut p, 0);
+        assert_eq!(l[9 * 9], SHADES[3], "the 10th sprite is drawn");
+        assert_eq!(l[10 * 9], SHADES[0], "the 11th is not");
+        // The 11th is on the next line only if it covers it; sprites on other lines don't count.
+        let mut p = sprite_ppu();
+        set_tile(&mut p, 2, [3; 8]);
+        for n in 0..10 {
+            set_sprite(&mut p, n, (n * 9) as i32, 20, 2, 0);
+        }
+        set_sprite(&mut p, 10, 100, 0, 2, 0);
+        assert_eq!(line(&mut p, 0)[100], SHADES[3]);
+    }
+
+    #[test]
+    fn eight_by_sixteen_ignores_tile_bit_0_and_spans_two_tiles() {
+        let mut p = sprite_ppu();
+        p.lcdc |= LCDC_SPRITE_SIZE_16;
+        set_tile(&mut p, 4, [1; 8]); // top
+        set_tile(&mut p, 5, [2; 8]); // bottom
+        set_sprite(&mut p, 0, 0, 0, 5, 0); // tile 5 behaves like 4
+        assert_eq!(line(&mut p, 0)[0], SHADES[1]);
+        assert_eq!(line(&mut p, 7)[0], SHADES[1]);
+        assert_eq!(line(&mut p, 8)[0], SHADES[2]);
+        assert_eq!(line(&mut p, 15)[0], SHADES[2]);
+        let mut p2 = p;
+        set_sprite(&mut p2, 0, 0, 0, 4, ATTR_Y_FLIP);
+        assert_eq!(
+            line(&mut p2, 0)[0],
+            SHADES[2],
+            "Y flip swaps the two halves"
+        );
+    }
+
+    #[test]
+    fn sprites_disabled_by_lcdc_bit_1() {
+        let mut p = sprite_ppu();
+        p.lcdc &= !LCDC_SPRITES_ENABLE;
+        set_sprite(&mut p, 0, 0, 0, 1, 0);
+        assert!(line(&mut p, 0).iter().all(|&c| c == SHADES[0]));
     }
 }
