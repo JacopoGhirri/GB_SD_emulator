@@ -24,8 +24,6 @@ pub enum MooneyeVerdict {
 /// Run until the first `LD B,B` executes, or `max_instructions` is exhausted.
 /// Returns the verdict and the number of instructions executed.
 pub fn run_mooneye(gb: &mut GameBoy, max_instructions: u64) -> (MooneyeVerdict, u64) {
-    // Mooneye ROMs wait for LY to reach 0x8F/0x90 at startup; there is no PPU until phase 3.
-    gb.set_ly_stub(true);
     for n in 0..max_instructions {
         let is_breakpoint = gb.bus().peek(gb.pc()) == OPCODE_LD_B_B;
         gb.step();

@@ -1,7 +1,7 @@
 //! Game Boy / Game Boy Color emulator core.
 //!
-//! Phase 1 in progress: cartridge header, bus, and the SM83 CPU. No PPU, APU or full timer yet.
-//! Methods for components that do not exist yet return placeholder values.
+//! Cartridge, bus, SM83 CPU, timer, DMA and (phase 3) the DMG PPU. No APU yet; audio methods
+//! return placeholder values.
 
 pub mod bus;
 pub mod cartridge;
@@ -11,6 +11,7 @@ pub mod interrupts;
 pub mod io;
 pub mod joypad;
 pub mod mooneye;
+pub mod ppu;
 pub mod serial;
 pub mod timer;
 
@@ -39,7 +40,6 @@ pub struct GameBoy {
     model: Model,
     cpu: Cpu,
     bus: Bus,
-    framebuffer: Vec<u32>,
 }
 
 impl GameBoy {
@@ -48,7 +48,6 @@ impl GameBoy {
             model,
             cpu: Cpu::new(),
             bus: Bus::new(cartridge),
-            framebuffer: vec![0; SCREEN_WIDTH * SCREEN_HEIGHT],
         }
     }
 
@@ -85,11 +84,6 @@ impl GameBoy {
         self.bus.set_doctor_mode(on);
     }
 
-    /// Make LY read a constant 0x90 (no PPU yet). Used by the Mooneye runner; see `Bus`.
-    pub fn set_ly_stub(&mut self, on: bool) {
-        self.bus.set_ly_stub(on);
-    }
-
     /// Read-only view of the CPU, for tracing and tests.
     pub fn cpu(&self) -> &Cpu {
         &self.cpu
@@ -105,7 +99,7 @@ impl GameBoy {
 
     /// 160*144 pixels, 0x00RRGGBB.
     pub fn framebuffer(&self) -> &[u32] {
-        &self.framebuffer
+        self.bus.ppu().framebuffer()
     }
 
     /// Held buttons (bit set = pressed, see [`Buttons`] constants).

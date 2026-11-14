@@ -10,6 +10,7 @@ use crate::interrupts::{Interrupt, Interrupts};
 use crate::io::{self, IO_LEN, IO_START};
 pub use crate::io::{REG_DMA, REG_LY, REG_P1};
 use crate::joypad::{Buttons, Joypad};
+use crate::ppu::{self, Ppu};
 use crate::serial::Serial;
 pub use crate::serial::{REG_SB, REG_SC};
 use crate::timer::{Timer, REG_DIV, REG_TAC};
@@ -39,15 +40,11 @@ const HRAM_END: u16 = 0xFFFE;
 
 // I/O registers.
 const DOCTOR_LY: u8 = 0x90;
-/// T-cycles per scanline and scanlines per frame (Pan Docs "Rendering": 456 dots x 154 lines).
-const STUB_LINE_CYCLES: u64 = 456;
-const STUB_LINES: u64 = 154;
 
 pub struct Bus {
     cartridge: Cartridge,
-    vram: [u8; 0x2000],
+    ppu: Ppu,
     wram: [u8; 0x2000],
-    oam: [u8; 0xA0],
     hram: [u8; 0x7F],
     /// Plain storage for I/O registers that have no behaviour yet.
     io: [u8; IO_LEN],
@@ -59,22 +56,17 @@ pub struct Bus {
     joypad: Joypad,
     serial: Serial,
     /// Gameboy Doctor mode, for tracing only. Doctor's reference logs were made by an emulator
-    /// where LY (0xFF44) always reads 0x90 (there is no PPU yet) and the unused upper bits of IF
+    /// where LY (0xFF44) always reads 0x90 (it had no PPU) and the unused upper bits of IF
     /// read 0 instead of 1 (real hardware reads 1; normal mode does the same as hardware).
     doctor_mode: bool,
-    /// Temporary stand-in until the PPU exists (phase 3): LY free-runs from the cycle counter
-    /// (one line per 456 T-cycles, 154 lines). Mooneye ROMs busy-wait on LY values 0x8F/0x90 at
-    /// startup (found by tracing div_write.gb). No modes, STAT or interrupts. Test-only.
-    ly_stub: bool,
 }
 
 impl Bus {
     pub fn new(cartridge: Cartridge) -> Bus {
         Bus {
             cartridge,
-            vram: [0; 0x2000],
+            ppu: Ppu::new(),
             wram: [0; 0x2000],
-            oam: [0; 0xA0],
             hram: [0; 0x7F],
             io: std::array::from_fn(|i| io::power_up_value(IO_START + i as u16)),
             interrupts: Interrupts::new(),
@@ -84,7 +76,6 @@ impl Bus {
             joypad: Joypad::new(),
             serial: Serial::new(),
             doctor_mode: false,
-            ly_stub: false,
         }
     }
 
@@ -111,9 +102,17 @@ impl Bus {
         if self.serial.tick() {
             self.request_interrupt(Interrupt::Serial);
         }
+        let irq = self.ppu.tick();
+        if irq.vblank {
+            self.request_interrupt(Interrupt::VBlank);
+        }
+        if irq.stat {
+            self.request_interrupt(Interrupt::LcdStat);
+        }
         if let Some((src, dst)) = self.dma.tick() {
             // The DMA reads the source directly, bypassing the CPU bus restriction.
-            self.oam[dst as usize] = self.peek(src);
+            let value = self.peek(src);
+            self.ppu.write_oam(dst as usize, value);
         }
     }
 
@@ -159,12 +158,12 @@ impl Bus {
     pub fn peek(&self, addr: u16) -> u8 {
         match addr {
             0..=ROM_END => self.cartridge.read_rom(addr),
-            VRAM_START..=VRAM_END => self.vram[(addr - VRAM_START) as usize],
+            VRAM_START..=VRAM_END => self.ppu.read_vram((addr - VRAM_START) as usize),
             EXT_RAM_START..=EXT_RAM_END => self.cartridge.read_ram(addr),
             WRAM_START..=WRAM_END => self.wram[(addr - WRAM_START) as usize],
             // Echo RAM mirrors WRAM (0xE000 maps to 0xC000).
             ECHO_START..=ECHO_END => self.wram[(addr - ECHO_START) as usize],
-            OAM_START..=OAM_END => self.oam[(addr - OAM_START) as usize],
+            OAM_START..=OAM_END => self.ppu.read_oam((addr - OAM_START) as usize),
             UNUSABLE_START..=UNUSABLE_END => 0xFF,
             IO_START..=IO_END => self.read_io(addr),
             HRAM_START..=HRAM_END => self.hram[(addr - HRAM_START) as usize],
@@ -175,11 +174,11 @@ impl Bus {
     fn poke(&mut self, addr: u16, value: u8) {
         match addr {
             0..=ROM_END => self.cartridge.write_rom(addr, value),
-            VRAM_START..=VRAM_END => self.vram[(addr - VRAM_START) as usize] = value,
+            VRAM_START..=VRAM_END => self.ppu.write_vram((addr - VRAM_START) as usize, value),
             EXT_RAM_START..=EXT_RAM_END => self.cartridge.write_ram(addr, value),
             WRAM_START..=WRAM_END => self.wram[(addr - WRAM_START) as usize] = value,
             ECHO_START..=ECHO_END => self.wram[(addr - ECHO_START) as usize] = value,
-            OAM_START..=OAM_END => self.oam[(addr - OAM_START) as usize] = value,
+            OAM_START..=OAM_END => self.ppu.write_oam((addr - OAM_START) as usize, value),
             UNUSABLE_START..=UNUSABLE_END => {}
             IO_START..=IO_END => self.write_io(addr, value),
             HRAM_START..=HRAM_END => self.hram[(addr - HRAM_START) as usize] = value,
@@ -197,7 +196,8 @@ impl Bus {
             REG_SB | REG_SC => self.serial.read(addr),
             REG_DIV..=REG_TAC => self.timer.read(addr),
             REG_LY if self.doctor_mode => DOCTOR_LY,
-            REG_LY if self.ly_stub => ((self.cycles / STUB_LINE_CYCLES) % STUB_LINES) as u8,
+            REG_DMA => self.io[(addr - IO_START) as usize] | io::read_mask(addr),
+            ppu::REG_LCDC..=ppu::REG_WX => self.ppu.read_reg(addr),
             _ => self.io[(addr - IO_START) as usize] | io::read_mask(addr),
         }
     }
@@ -216,6 +216,7 @@ impl Bus {
                 self.io[(addr - IO_START) as usize] = value;
                 self.dma.start(value);
             }
+            ppu::REG_LCDC..=ppu::REG_WX => self.ppu.write_reg(addr, value),
             _ => self.io[(addr - IO_START) as usize] = value,
         }
     }
@@ -232,9 +233,12 @@ impl Bus {
         }
     }
 
-    /// See the `ly_stub` field. Remove when the PPU lands.
-    pub fn set_ly_stub(&mut self, on: bool) {
-        self.ly_stub = on;
+    pub fn ppu(&self) -> &Ppu {
+        &self.ppu
+    }
+
+    pub fn ppu_mut(&mut self) -> &mut Ppu {
+        &mut self.ppu
     }
 
     /// Bytes written to the serial port since the last call.
