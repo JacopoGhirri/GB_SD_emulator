@@ -1,13 +1,13 @@
 # PROGRESS
 
-**Current phase:** 2 — gate met on 2026-11-14 (awaiting owner sign-off before phase 3)
+**Current phase:** 3 — all automated gate items met on 2026-11-14; awaiting owner's visual review (see "Phase 3" below) before phase 4
 **Last updated:** 2026-11-14
 
 ## Status by phase
 - [x] 0 Bootstrap
 - [x] 1 CPU  (gate met 2026-11-13, see "Phase 1 — CPU: gate status")
 - [x] 2 Bus, timer, cartridge  (gate met 2026-11-14, see "Phase 2" below)
-- [ ] 3 PPU
+- [~] 3 PPU  (automated gate met 2026-11-14; human visual review pending, see "Phase 3" below)
 - [ ] 4 Frontend, input, saves
 - [ ] 5 Pokémon Red/Blue
 - [ ] 6 APU
@@ -200,7 +200,7 @@ Extra, not gated (cli loop, DMG-compatible Mooneye ROMs in `acceptance/` root, `
 ### Phase 2 decisions
 - **Mooneye runner** (`gb_core::mooneye`, used by `gb-cli --mooneye --max-instructions N` and `tests/mooneye.rs`): pass = `LD B,B` executed with B,C,D,E,H,L = 3,5,8,13,21,34; 0x42 x6 = fail; no `LD B,B` in budget = timeout.
 - **DMG filter rule** (README "Test naming", `mooneye::dmg_compatible`): no suffix = run; suffix made of group letters G/S/C/A runs iff it contains `G` (dmg+mgb); `dmg`/`dmgABC`/`dmgABCmgb` run; `dmg0` (first silicon, other power-up values), `mgb`, `sgb*`, `cgb*`, `agb*`, S-only, C-only, A-only are "skipped: other hardware", never counted as failures. Unit-tested.
-- **Test-only LY stand-in (owner decision 2026-11-14):** Mooneye's startup code busy-waits for LY = 0x8F then 0x90 (twice), so a constant LY hangs. `Bus::set_ly_stub` makes LY free-run as `(cycles / 456) % 154`; no modes/STAT/interrupts. Enabled only by `run_mooneye`. **Phase 3 replaces it with the real PPU and must delete `ly_stub`.**
+- **Test-only LY stand-in (owner decision 2026-11-14):** Mooneye's startup code busy-waits for LY = 0x8F then 0x90 (twice), so a constant LY hangs. `Bus::set_ly_stub` makes LY free-run as `(cycles / 456) % 154`; no modes/STAT/interrupts. Enabled only by `run_mooneye`. **Done in phase 3: the real PPU replaced it and `ly_stub` is deleted.**
 - **Bus tick ordering decided by tests (2026-11-14):** the CPU access now happens *before* the M-cycle tick (read: peek then tick; write: poke then tick). Experiment over the four read/write orderings: tick-first for both (phase-1 design) passed 12/13 timer ROMs (rapid_toggle failed); access-first for reads only or writes only failed 5-6 timer ROMs and all of Blargg instr/mem timing; access-first for both passed 13/13 timer ROMs and Blargg. Recorded in a comment on `Bus::read`.
 - **Timer:** 16-bit counter stepped 4 per M-cycle, post-boot counter 0xABCC (DIV = 0xAB); TIMA falling edge, one-cycle overflow window, reload next cycle. 0xABCC worked with all 13 Mooneye timer ROMs.
 - **OAM DMA:** first byte copied 2 M-cycles after the write cycle; a restart lets the old transfer run through the start-up delay; while active the CPU reads 0xFF / ignores writes for everything below 0xFF00 (HRAM, I/O and IE stay accessible); source pages 0xE0-0xFF mirror 0xC0-0xDF.
@@ -218,3 +218,70 @@ Extra, not gated (cli loop, DMG-compatible Mooneye ROMs in `acceptance/` root, `
 - `unused_hwio` and the other register tests only check the registers that exist; APU/PPU registers are plain storage until their phases.
 - Writes to ROM/RAM during OAM DMA are dropped for the whole range below 0xFF00, which is simpler than the real per-bus conflict behaviour.
 - The 13 non-gated Mooneye ROMs listed above fail.
+
+## Phase 3 — PPU (DMG graphics): gate status (2026-11-14)
+Environment as before (WSL Ubuntu, rustc 1.100.0).
+
+- [x] `dmg-acid2` matches the reference exactly via `gb-cli --compare` (first attempt after sprites landed).
+- [x] Mooneye `acceptance/ppu`: recorded below, 6 of 12 pass; no regression elsewhere.
+- [x] Blargg `instr_timing`, `mem_timing`, `mem_timing-2`, cpu_instrs, Doctor diffs and all phase-2 Mooneye groups still pass.
+- [ ] **Owner review of screenshots** (human gate item): see "Screenshots to review".
+- [x] `cargo test` includes acid2 as an automated screenshot test (`crates/gb-cli/tests/acid2.rs`, drives the real `gb-cli` binary).
+
+```
+$ cargo test --workspace   (WSL)
+test result: ok. 7 passed    (gb-cli unit)
+test result: ok. 3 passed    (gb-cli tests/acid2.rs: dmg-acid2, wrong-frame-must-fail, 4 scribbltests)
+test result: ok. 123 passed  (gb-core unit: ppu, ppu::render, ppu::debug, bus, ...)
+test result: ok. 3 passed    (tests/blargg_timing.rs)
+test result: ok. 12 passed   (tests/cpu_instrs.rs)
+test result: ok. 11 passed   (tests/doctor_trace.rs, 37 s)
+test result: ok. 2 passed    (tests/harness_smoke.rs)
+test result: ok. 7 passed    (tests/mooneye.rs: 6 phase-2 groups + ppu recorded)
+$ cargo clippy --workspace --all-targets -- -D warnings   -> clean;  cargo fmt --all -- --check -> fmt-ok
+
+$ gb-cli run dmg-acid2.gb --frames 10 --compare dmg-acid2-dmg.png
+compare passed: final frame matches .../dmg-acid2/dmg-acid2-dmg.png
+$ gb-cli run dmg-acid2.gb --frames 1 --compare dmg-acid2-dmg.png     (control: must fail)
+compare FAILED: 10191 pixels differ from .../dmg-acid2-dmg.png
+
+$ scribbltests (120 frames, --compare against shipped DMG-valid references)
+lycscx, lycscy, scxly, palettely: compare passed (all four)
+```
+
+### Mooneye `acceptance/ppu` scoreboard (recorded, not gated; 6 pinned as regression guards in `tests/mooneye.rs`)
+| ROM | Result |
+|---|---|
+| intr_1_2_timing-GS | PASS |
+| intr_2_0_timing | PASS |
+| intr_2_mode0_timing | PASS |
+| intr_2_mode3_timing | PASS |
+| intr_2_oam_ok_timing | PASS |
+| stat_irq_blocking | PASS |
+| hblank_ly_scx_timing-GS | FAIL (needs SCX-dependent mode 3 length) |
+| intr_2_mode0_timing_sprites | FAIL (needs sprite-dependent mode 3 length) |
+| lcdon_timing-GS | FAIL (LCD-on first-line timing is approximate) |
+| lcdon_write_timing-GS | FAIL (same) |
+| stat_lyc_onoff | FAIL (LYC/LCD-off edge cases not modelled) |
+| vblank_stat_intr-GS | FAIL (VBlank/mode-2 STAT quirk at line 144 not modelled) |
+The failures are exactly the cycle-exact items the phase file puts out of scope; causes above are my reading of the ROM names, not yet investigated.
+
+### Screenshots to review (owner)
+Generated with `gb-cli run <rom> --frames 120 --screenshot out.png`. I viewed these and they look right: dmg-acid2 (the face, matches reference), Blargg cpu_instrs text, scribbltests `winpos` (WX/WY labels and tiled window), `fairylake` (parallax-scrolled sunrise). Please run `winpos`, `fairylake` and any ROM you like yourself; there are no reference images for those two.
+
+### Phase 3 decisions
+- **Layout:** `ppu/mod.rs` (registers, state machine, STAT), `ppu/render.rs` (`render_line`, the seam for a future pixel FIFO), `ppu/debug.rs` (tile atlas, BG maps). The Bus owns the `Ppu`, which owns VRAM and OAM. `peek` and DMA bypass access blocking; CPU `read`/`write` do not.
+- **Palette:** plain greyscale `FF, AA, 55, 00` (dmg-acid2 README requires these values).
+- **Timing:** mode 2 = 80 dots, mode 3 fixed at 172, then mode 0. The line is drawn at the end of mode 3, so register writes in mode 3 are not seen on that line.
+- **STAT:** one shared line (OR of enabled sources), interrupt on rising edge. DMG write quirk implemented: writing STAT while in HBlank/VBlank or with LY==LYC, with the line low, requests an interrupt. OAM-scan is not part of the quirk. Not yet verified against a ROM (`stat_lyc_onoff` fails for other reasons).
+- **LCD on:** restarts at line 0; line 0 has no OAM scan (mode 0 for its first 80 dots). **LCD off:** LY=0, mode 0, screen cleared, a frame boundary every 70224 dots so pacing continues.
+- **Frame handling:** `Ppu::back` is drawn into and copied to the visible framebuffer when line 144 starts, so a half-drawn frame is never exposed. `GameBoy::run_frame` steps until that frame-ready flag.
+- **Window:** internal line counter advances only on lines where the window was drawn, reset each frame. Drawn when LCDC.5, LY >= WY and WX <= 166.
+- **Post-boot position:** the PPU starts at line 0, dot 0 (the real post-boot dot is not documented in Pan Docs). Mooneye ppu tests that pass suggest it is close enough.
+- **Test placement:** the acid2 test lives in `gb-cli` (it already depends on `png`), not `gb-core`, which must stay dependency-free.
+- **Debug dumps (`gb-cli`):** `--dump-tiles`, `--dump-bgmap-9800`, `--dump-bgmap-9c00`; `--compare` now also reads greyscale PNGs.
+
+### Phase 3 known issues
+- Line 153 LY quirk (LY reads 0 early on the last line), OAM bug, and sprite-dependent mode 3 length are not modelled.
+- The 13 non-gated Mooneye `acceptance/` root ROMs from phase 2 were not re-run after the PPU change (their CPU-timing causes are unrelated).
+- A commit (`867eae9`) was made with one failing PPU unit test; it was fixed in the next commit (`926aeda`). The intermediate commit does not pass `cargo test`.
