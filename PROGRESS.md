@@ -1,12 +1,12 @@
 # PROGRESS
 
-**Current phase:** 1 — CPU gate met on 2026-11-13 (awaiting owner sign-off before phase 2)
-**Last updated:** 2026-11-13
+**Current phase:** 2 — gate met on 2026-11-14 (awaiting owner sign-off before phase 3)
+**Last updated:** 2026-11-14
 
 ## Status by phase
 - [x] 0 Bootstrap
 - [x] 1 CPU  (gate met 2026-11-13, see "Phase 1 — CPU: gate status")
-- [ ] 2 Bus, timer, cartridge  ← next (MUST replace the phase-1 minimal timer and minimal MBC1)
+- [x] 2 Bus, timer, cartridge  (gate met 2026-11-14, see "Phase 2" below)
 - [ ] 3 PPU
 - [ ] 4 Frontend, input, saves
 - [ ] 5 Pokémon Red/Blue
@@ -168,6 +168,53 @@ Note: each Blargg ROM was first run through `gb-cli` and passed on the first att
 - `--mooneye` is still unimplemented (exit 2); it belongs to phase 2's gate.
 - `halt_bug` ROM and the other Blargg suites (`instr_timing`, `mem_timing`, `halt_bug`) have not been run; they are phase 2 gates. Only the HALT-bug unit test exists.
 
-## Phase 2 reminders
-- [ ] **Replace the phase-1 minimal timer with the accurate falling-edge implementation.**
-- [ ] **Replace the phase-1 minimal MBC1 with the full mapper (and MBC3/MBC5).**
+## Phase 2 — Bus, timer, DMA, cartridge: gate status (2026-11-14)
+Environment as phase 1 (WSL Ubuntu, rustc 1.100.0).
+
+- [x] All phase 1 tests still pass (cpu_instrs individual + combined, Doctor diffs 01..11).
+- [x] Blargg `instr_timing`, `mem_timing`, `mem_timing-2` pass.
+- [x] Mooneye `acceptance/timer`, `oam_dma`, `interrupts`, `bits`, `emulator-only/mbc1`, `mbc5`: all DMG-compatible ROMs pass.
+- [x] MBC3 unit-tested (bank math, RAM banks, RTC latch, carries, day overflow/halt, save footer).
+- [x] Timer unit tests: falling edges (DIV write, TAC enable/clock-select), TIMA overflow window.
+
+```
+$ cargo test --workspace   (WSL)
+test result: ok. 6 passed   (gb-cli)
+test result: ok. 87 passed  (gb-core unit)
+test result: ok. 3 passed   (tests/blargg_timing.rs)
+test result: ok. 12 passed  (tests/cpu_instrs.rs)
+test result: ok. 11 passed  (tests/doctor_trace.rs, 37 s)
+test result: ok. 2 passed   (tests/harness_smoke.rs)
+test result: ok. 6 passed   (tests/mooneye.rs)
+$ cargo clippy --workspace --all-targets -- -D warnings   -> clean;  cargo fmt --all -- --check -> fmt-ok
+
+$ cargo test -p gb-core --test mooneye -- --nocapture --test-threads=1
+acceptance/bits: 3 passed, 0 failed          acceptance/interrupts: 1 passed, 0 failed
+acceptance/oam_dma: 3 passed, 0 failed       acceptance/timer: 13 passed, 0 failed
+emulator-only/mbc1: 13 passed, 0 failed      emulator-only/mbc5: 8 passed, 0 failed
+$ cargo test -p gb-core --test blargg_timing -- --nocapture
+instr_timing: Passed   mem_timing: "01:ok 02:ok 03:ok Passed"   mem_timing-2: status 0x00 after 1224704 instructions, "Passed"
+```
+Extra, not gated (cli loop, DMG-compatible Mooneye ROMs in `acceptance/` root, `instr`, `interrupts`, `serial`): 18 pass, 13 fail. Failing: add_sp_e_timing, call_cc_timing, call_timing, di_timing-GS, halt_ime0_ei, halt_ime0_nointr_timing, halt_ime1_timing2-GS, jp_cc_timing, jp_timing, ld_hl_sp_e_timing, ret_cc_timing, ret_timing, reti_timing. Not investigated (out of the gate); the pattern (jp/call/ret/add sp timing) suggests the *order* of internal-delay M-cycles versus bus accesses inside those instructions. Worth a look in phase 8 (accuracy). `oam_dma_start/restart/timing` pass.
+
+### Phase 2 decisions
+- **Mooneye runner** (`gb_core::mooneye`, used by `gb-cli --mooneye --max-instructions N` and `tests/mooneye.rs`): pass = `LD B,B` executed with B,C,D,E,H,L = 3,5,8,13,21,34; 0x42 x6 = fail; no `LD B,B` in budget = timeout.
+- **DMG filter rule** (README "Test naming", `mooneye::dmg_compatible`): no suffix = run; suffix made of group letters G/S/C/A runs iff it contains `G` (dmg+mgb); `dmg`/`dmgABC`/`dmgABCmgb` run; `dmg0` (first silicon, other power-up values), `mgb`, `sgb*`, `cgb*`, `agb*`, S-only, C-only, A-only are "skipped: other hardware", never counted as failures. Unit-tested.
+- **Test-only LY stand-in (owner decision 2026-11-14):** Mooneye's startup code busy-waits for LY = 0x8F then 0x90 (twice), so a constant LY hangs. `Bus::set_ly_stub` makes LY free-run as `(cycles / 456) % 154`; no modes/STAT/interrupts. Enabled only by `run_mooneye`. **Phase 3 replaces it with the real PPU and must delete `ly_stub`.**
+- **Bus tick ordering decided by tests (2026-11-14):** the CPU access now happens *before* the M-cycle tick (read: peek then tick; write: poke then tick). Experiment over the four read/write orderings: tick-first for both (phase-1 design) passed 12/13 timer ROMs (rapid_toggle failed); access-first for reads only or writes only failed 5-6 timer ROMs and all of Blargg instr/mem timing; access-first for both passed 13/13 timer ROMs and Blargg. Recorded in a comment on `Bus::read`.
+- **Timer:** 16-bit counter stepped 4 per M-cycle, post-boot counter 0xABCC (DIV = 0xAB); TIMA falling edge, one-cycle overflow window, reload next cycle. 0xABCC worked with all 13 Mooneye timer ROMs.
+- **OAM DMA:** first byte copied 2 M-cycles after the write cycle; a restart lets the old transfer run through the start-up delay; while active the CPU reads 0xFF / ignores writes for everything below 0xFF00 (HRAM, I/O and IE stay accessible); source pages 0xE0-0xFF mirror 0xC0-0xDF.
+- **Interrupt dispatch:** the vector is chosen after the high-byte push and before the low-byte push (needed for `ie_push`); a cancelled dispatch jumps to 0x0000 without clearing IF.
+- **Joypad:** `Buttons` bit set = pressed: RIGHT 0, LEFT 1, UP 2, DOWN 3, A 4, B 5, SELECT 6, START 7.
+- **Serial:** every internal-clock transfer start captures SB (test output); the transfer completes after 4096 T-cycles with SB = 0xFF, SC bit 7 cleared and the serial interrupt. External clock never completes.
+- **I/O registers:** every register has a named constant, DMG post-boot value and read mask (`io.rs`). OBP0/OBP1 power up as 0xFF (undefined in Pan Docs). Unmapped registers read 0xFF.
+- **Cartridge:** ROM only, MBC1 (+ multicart detection: 1 MiB with the Nintendo logo at banks 0x10/0x20/0x30), MBC3 (+RTC), MBC5. Other types fail with `CartridgeError::UnsupportedType` (MBC2, HuC1/3, MBC6/7, ROM+RAM types 0x08/0x09 are not supported). RAM wraps inside its real size (2 KiB RAM is mirrored).
+- **RTC save format (verified first, per owner):** BGB's documented footer (https://bgb.bircd.org/rtcsave.html) is also used by VBA-M and others: RAM, then 48 bytes = live seconds/minutes/hours/days-low/days-high as five little-endian u32 (value in the low byte), the same five latched, then a u64 Unix timestamp. Old VBA writes 44 bytes (u32 timestamp); we load both and write 48. I could confirm the 44/48 sizes, the little-endian dwords and the offsets of the latched days (32/36) and timestamp (40/44); the exact order of the first ten registers is from memory and matches those offsets. **Not verified against a real file from another emulator**: if you have a save from BGB/VBA-M/mGBA, try loading it. The timestamp is written as 0 and ignored on load (the core has no wall clock; a wall-clock mode comes in phase 4/8).
+- **RTC time base:** emulated cycles (1 s = 1,048,576 M-cycles); halt bit stops it; day counter wraps at 512 with the carry flag set.
+- **Blargg newer ROMs** (mem_timing-2) report through cartridge RAM (signature DE B0 61 at 0xA001, status at 0xA000, text at 0xA004) rather than serial; `run_blargg_ram` in `tests/common` reads it.
+
+### Phase 2 known issues
+- `mbc3-tester` and `rtc3test` ROMs not run: their pass criterion is a screenshot (needs the PPU). Not gated.
+- `unused_hwio` and the other register tests only check the registers that exist; APU/PPU registers are plain storage until their phases.
+- Writes to ROM/RAM during OAM DMA are dropped for the whole range below 0xFF00, which is simpler than the real per-bus conflict behaviour.
+- The 13 non-gated Mooneye ROMs listed above fail.
