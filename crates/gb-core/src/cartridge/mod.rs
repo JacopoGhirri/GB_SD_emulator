@@ -71,6 +71,14 @@ pub trait Mapper: fmt::Debug {
     /// Battery-backed data to persist (empty if none).
     fn save_data(&self) -> Vec<u8>;
     fn load_save(&mut self, data: &[u8]);
+    /// Wall-clock support for frontends (MBC3+TIMER only; no-ops elsewhere). The core never
+    /// reads the system clock itself, so emulation stays deterministic.
+    fn set_save_timestamp(&mut self, _unix_secs: u64) {}
+    /// Unix time stored in the loaded save, `None` if the cartridge has no clock.
+    fn save_timestamp(&self) -> Option<u64> {
+        None
+    }
+    fn advance_rtc_seconds(&mut self, _secs: u64) {}
 }
 
 /// Cartridge RAM. An absent RAM reads 0xFF; offsets wrap inside the actual size, which is how
@@ -216,5 +224,21 @@ impl Cartridge {
     }
     pub fn load_save(&mut self, data: &[u8]) {
         self.mapper.load_save(data);
+    }
+    /// True for cartridges with a battery-backed real-time clock (MBC3+TIMER).
+    pub fn has_rtc(&self) -> bool {
+        self.mapper.save_timestamp().is_some()
+    }
+    /// Stamp the next `save_data()` with this Unix time (RTC cartridges only).
+    pub fn set_save_timestamp(&mut self, unix_secs: u64) {
+        self.mapper.set_save_timestamp(unix_secs);
+    }
+    /// Unix time stored in the loaded save (0 = unknown), `None` without an RTC.
+    pub fn save_timestamp(&self) -> Option<u64> {
+        self.mapper.save_timestamp()
+    }
+    /// Advance the RTC by real elapsed seconds. Frontend use only.
+    pub fn advance_rtc_seconds(&mut self, secs: u64) {
+        self.mapper.advance_rtc_seconds(secs);
     }
 }

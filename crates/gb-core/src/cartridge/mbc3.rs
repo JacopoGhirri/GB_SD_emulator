@@ -7,7 +7,9 @@
 //!   that the RTC reads return.
 //!
 //! The RTC counts *emulated* time (1 second = 1,048,576 M-cycles), so runs are deterministic.
-//! A wall-clock mode for the real frontend comes later (phase 4/8).
+//! The core never reads a wall clock. A frontend that wants the clock to keep running while the
+//! emulator is closed stamps the save with the current Unix time (`set_save_timestamp`) and, on
+//! the next start, advances the clock by the elapsed seconds (`advance_rtc_seconds`).
 //!
 //! ## Save format
 //! `save_data()` is the cartridge RAM followed, for MBC3+TIMER cartridges, by the 48-byte RTC
@@ -17,8 +19,7 @@
 //!   20..40 latched registers, same order
 //!   40..48 Unix timestamp (u64) of when the save was written
 //! Loading also accepts the older 44-byte footer (32-bit timestamp) and no footer at all. The
-//! timestamp is written as 0 and ignored on load: this core has no wall clock, so time does not
-//! advance while the emulator is closed (a later wall-clock mode may use it).
+//! timestamp is whatever the frontend set (0 by default, i.e. "unknown"); loading just remembers it.
 
 use super::{ram_offset, Mapper, Ram};
 
@@ -45,6 +46,8 @@ struct Rtc {
     latched: [u8; 5],
     /// Last value written to the latch register; a 0 -> 1 sequence latches.
     latch_armed: bool,
+    /// Unix time stored in the save footer (0 = unknown). Only the frontend gives it meaning.
+    timestamp: u64,
 }
 
 impl Rtc {
@@ -117,6 +120,29 @@ impl Rtc {
         }
     }
 
+    /// Move the running clock forward by `secs` real seconds (a halted clock does not move).
+    /// The latched registers are left alone, as on hardware.
+    fn advance_seconds(&mut self, secs: u64) {
+        if self.halted {
+            return;
+        }
+        let day_secs = 86_400u64;
+        let now = self.seconds as u64
+            + 60 * self.minutes as u64
+            + 3600 * self.hours as u64
+            + day_secs * self.days as u64;
+        let total = now + secs;
+        let days = total / day_secs;
+        if days >= 512 {
+            self.day_carry = true;
+        }
+        let rem = total % day_secs;
+        self.days = (days % 512) as u16;
+        self.hours = (rem / 3600) as u8;
+        self.minutes = (rem % 3600 / 60) as u8;
+        self.seconds = (rem % 60) as u8;
+    }
+
     fn write_latch(&mut self, value: u8) {
         if value == 0 {
             self.latch_armed = true;
@@ -136,7 +162,7 @@ impl Rtc {
         for (i, v) in self.latched.iter().enumerate() {
             out[20 + i * 4] = *v;
         }
-        // Bytes 40..48: timestamp, left 0 (see module docs).
+        out[40..48].copy_from_slice(&self.timestamp.to_le_bytes());
         out
     }
 
@@ -147,6 +173,11 @@ impl Rtc {
             self.latched[i] = reg(5 + i);
         }
         self.sub_cycles = 0;
+        self.timestamp = if footer.len() == RTC_FOOTER_LEN {
+            u64::from_le_bytes(footer[40..48].try_into().unwrap_or([0; 8]))
+        } else {
+            u32::from_le_bytes(footer[40..44].try_into().unwrap_or([0; 4])) as u64
+        };
     }
 }
 
@@ -242,6 +273,22 @@ impl Mapper for Mbc3 {
         }
     }
 
+    fn set_save_timestamp(&mut self, unix_secs: u64) {
+        if let Some(rtc) = self.rtc.as_mut() {
+            rtc.timestamp = unix_secs;
+        }
+    }
+
+    fn save_timestamp(&self) -> Option<u64> {
+        self.rtc.as_ref().map(|r| r.timestamp)
+    }
+
+    fn advance_rtc_seconds(&mut self, secs: u64) {
+        if let Some(rtc) = self.rtc.as_mut() {
+            rtc.advance_seconds(secs);
+        }
+    }
+
     fn save_data(&self) -> Vec<u8> {
         if !self.battery {
             return Vec::new();
@@ -273,6 +320,29 @@ impl Mapper for Mbc3 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wall_clock_advance_carries_and_respects_halt() {
+        let mut m = mbc(0x2000, true);
+        m.set_save_timestamp(1234);
+        m.advance_rtc_seconds(90_061); // 1 d 1 h 1 min 1 s
+        let r = m.rtc.as_ref().unwrap();
+        assert_eq!((r.days, r.hours, r.minutes, r.seconds), (1, 1, 1, 1));
+        // 511 more days pushes the day counter over 511: wraps and sets carry.
+        m.advance_rtc_seconds(511 * 86_400);
+        let r = m.rtc.as_ref().unwrap();
+        assert_eq!(r.days, 0);
+        assert!(r.day_carry);
+        // Timestamp survives a save/load round trip.
+        let saved = m.save_data();
+        let mut n = mbc(0x2000, true);
+        n.load_save(&saved);
+        assert_eq!(n.save_timestamp(), Some(1234));
+        // A halted clock does not move.
+        let mut h = mbc(0x2000, true);
+        h.rtc.as_mut().unwrap().halted = true;
+        h.advance_rtc_seconds(100);
+        assert_eq!(h.rtc.as_ref().unwrap().seconds, 0);
+    }
     use super::*;
 
     fn mbc(ram: usize, rtc: bool) -> Mbc3 {

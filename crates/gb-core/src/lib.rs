@@ -59,6 +59,11 @@ impl GameBoy {
         self.bus.cartridge()
     }
 
+    /// Mutable cartridge access, for frontends (wall-clock RTC stamping).
+    pub fn cartridge_mut(&mut self) -> &mut Cartridge {
+        self.bus.cartridge_mut()
+    }
+
     /// Execute one CPU instruction (or one idle HALT step). Returns T-cycles elapsed.
     pub fn step(&mut self) -> u32 {
         self.cpu.step(&mut self.bus)
