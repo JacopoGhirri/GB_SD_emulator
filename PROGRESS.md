@@ -8,7 +8,7 @@
 - [x] 1 CPU  (gate met 2026-11-13, see "Phase 1 — CPU: gate status")
 - [x] 2 Bus, timer, cartridge  (gate met 2026-11-14, see "Phase 2" below)
 - [x] 3 PPU  (gate met 2026-11-14, owner visual review done, see "Phase 3" below)
-- [~] 4 Frontend, input, saves  (in progress)
+- [~] 4 Frontend, input, saves  (automated work done; human gate items open, see "Phase 4" below)
 - [ ] 5 Pokémon Red/Blue
 - [ ] 6 APU
 - [ ] 7 CGB
@@ -285,3 +285,48 @@ Generated with `gb-cli run <rom> --frames 120 --screenshot out.png`. I viewed th
 - Line 153 LY quirk (LY reads 0 early on the last line), OAM bug, and sprite-dependent mode 3 length are not modelled.
 - The 13 non-gated Mooneye `acceptance/` root ROMs from phase 2 were not re-run after the PPU change (their CPU-timing causes are unrelated).
 - A commit (`867eae9`) was made with one failing PPU unit test; it was fixed in the next commit (`926aeda`). The intermediate commit does not pass `cargo test`.
+
+## Phase 4 — Frontend, input, saves: status (2026-11-14)
+Environment as before (WSL Ubuntu, rustc 1.100.0, system libsdl2 2.32.10). **Automated work is done; the gate's human items are open.**
+
+- [x] `gb-sdl <rom> [--scale N] [--fullscreen] [--swap-ab] [--frames N]`: SDL window, 160x144 streaming texture, integer scale + letterbox, F11 fullscreen.
+- [x] Pacing (`pacing.rs`, one function): monotonic 16.742 ms deadline, Tab = uncapped.
+- [x] Keyboard and gamepad (GameController API, hot-plug, left stick, `--swap-ab`), mapping tables at the top of `input.rs`.
+- [x] Saves: `<rom>.sav` beside the ROM, atomic temp+rename, flushed on quit/SIGINT/SIGTERM (SDL_QUIT), focus loss and every 30 s if changed; wrong-size save moved to `.sav.bad`.
+- [x] RTC wall-clock mode (frontend only): save footer timestamp, `advance_rtc_seconds` on load. Core default stays deterministic.
+- [x] Errors: missing/garbage ROM, unsupported mapper, bad save give a message and exit 1 (2 for bad arguments), no panics.
+- [ ] **Human:** run at correct speed with keyboard AND gamepad (feel, speed).
+- [ ] **Human:** manual battery save round trip in the frontend with a real battery game.
+- [ ] **Human:** Steam Deck Game Mode run; then correct `docs/STEAMDECK.md` (currently an UNVERIFIED draft).
+
+```
+$ cargo test --workspace   (WSL)
+test result: ok. 7 passed    (gb-cli unit)       test result: ok. 3 passed    (gb-cli tests/acid2.rs)
+test result: ok. 124 passed  (gb-core unit)      test result: ok. 3 passed    (blargg_timing)
+test result: ok. 12 passed   (cpu_instrs)        test result: ok. 2 passed    (determinism: dmg-acid2, fairylake, 600 frames x2)
+test result: ok. 11 passed   (doctor_trace)      test result: ok. 2 passed    (harness_smoke)
+test result: ok. 7 passed    (mooneye)           test result: ok. 5 passed    (save_roundtrip: MBC1/3/5 RAM, RTC footer+timestamp)
+test result: ok. 14 passed   (gb-sdl: input, pacing, save, video)
+$ cargo clippy --workspace --all-targets -- -D warnings -> clean;  cargo fmt --all -- --check -> fmt-ok
+
+$ SDL_VIDEODRIVER=dummy gb-sdl savetest.gb --frames 300     (synthetic MBC1+RAM+battery ROM that writes 0x42 to RAM)
+real 0m5.012s            (300 frames at 59.7275 Hz = 5.023 s)
+$ xxd savetest.gb.sav | head -1  ->  00000000: 4200 0000 ...   (8192-byte save written on exit)
+$ gb-sdl /nonexistent.gb -> "error: cannot read ROM ...", exit 1;  100-byte ROM -> "too small to contain a header", exit 1
+$ gb-sdl odd.gb (123-byte .sav, expected ~8192) -> warning, moved to odd.gb.sav.bad, exit 0
+```
+Headless checks used SDL's dummy video driver, so they prove the loop, pacing and save flush, **not** that a window, keyboard or gamepad work. Nobody has seen the real window yet.
+
+### Phase 4 decisions
+- **Build env:** WSL with system `libsdl2-dev` (owner choice); CI installs `libsdl2-dev`. No `bundled` feature.
+- **Dependency:** `sdl2` 0.37 for `gb-sdl` (window, texture, keyboard, GameController). No clap in `gb-sdl`: hand-rolled argument parsing.
+- **Save location:** `<rom>.sav` beside the ROM (not an XDG dir).
+- **Opposite D-pad directions:** both held = neither reported.
+- **Pacing:** timer deadline, no vsync, so it works the same on any refresh rate; phase 6 replaces `Pacer` with audio-driven pacing.
+- **RTC:** the core never reads the clock; the frontend stamps the footer (`set_save_timestamp`) and advances on load. A halted RTC does not advance; a backwards clock adds 0.
+- **Window events:** `--frames N` is still paced (that is how the 5.012 s figure was measured).
+
+### Phase 4 known issues
+- Focus-loss flush and hot-plug code paths are untested without real devices.
+- A crash (panic) does not flush the save; only quit, signals and the 30 s timer do.
+- Save write failures print an error and are retried at the next flush; they do not stop the game.
