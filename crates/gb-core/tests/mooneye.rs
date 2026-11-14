@@ -24,7 +24,6 @@ fn acceptance_timer() {
     sweep(&format!("{MOONEYE}/acceptance/timer"));
 }
 #[test]
-#[ignore = "sources-GS needs MBC5 cartridge RAM (task 7); basic, reg_read pass"]
 fn acceptance_oam_dma() {
     sweep(&format!("{MOONEYE}/acceptance/oam_dma"));
 }
@@ -38,12 +37,10 @@ fn acceptance_bits() {
     sweep(&format!("{MOONEYE}/acceptance/bits"));
 }
 #[test]
-#[ignore = "phase 2 in progress: un-ignore when this area is implemented"]
 fn emulator_only_mbc1() {
     sweep(&format!("{MOONEYE}/emulator-only/mbc1"));
 }
 #[test]
-#[ignore = "phase 2 in progress: un-ignore when this area is implemented"]
 fn emulator_only_mbc5() {
     sweep(&format!("{MOONEYE}/emulator-only/mbc5"));
 }

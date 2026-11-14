@@ -118,13 +118,16 @@ impl GameBoy {
         self.bus.take_serial()
     }
 
-    /// Cartridge RAM for battery saves. Placeholder: empty.
+    /// Battery-backed cartridge data for a `.sav` file (RAM, plus the RTC footer on MBC3+TIMER).
+    /// Empty if the cartridge has no battery.
     pub fn save_ram(&self) -> Vec<u8> {
-        Vec::new()
+        self.bus.cartridge().save_data()
     }
 
-    /// Restore cartridge RAM from a save file. Placeholder: ignores input.
-    pub fn load_save_ram(&mut self, _data: &[u8]) {}
+    /// Restore a save made by [`GameBoy::save_ram`]. Short or oversized data never panics.
+    pub fn load_save_ram(&mut self, data: &[u8]) {
+        self.bus.cartridge_mut().load_save(data);
+    }
 
     /// Append interleaved stereo f32 samples. Placeholder: appends nothing.
     pub fn drain_audio(&mut self, _out: &mut Vec<f32>) {}

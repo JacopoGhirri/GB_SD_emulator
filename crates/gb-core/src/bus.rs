@@ -92,6 +92,10 @@ impl Bus {
         &self.cartridge
     }
 
+    pub fn cartridge_mut(&mut self) -> &mut Cartridge {
+        &mut self.cartridge
+    }
+
     /// Total T-cycles elapsed since power-on.
     pub fn cycles(&self) -> u64 {
         self.cycles
@@ -103,6 +107,7 @@ impl Bus {
         if self.timer.tick() {
             self.request_interrupt(Interrupt::Timer);
         }
+        self.cartridge.tick();
         if self.serial.tick() {
             self.request_interrupt(Interrupt::Serial);
         }
