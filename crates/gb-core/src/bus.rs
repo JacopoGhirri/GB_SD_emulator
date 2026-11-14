@@ -6,6 +6,8 @@
 
 use crate::cartridge::Cartridge;
 use crate::interrupts::{Interrupt, Interrupts};
+use crate::io::{self, IO_LEN, IO_START};
+pub use crate::io::{REG_LY, REG_SB, REG_SC};
 use crate::timer::{Timer, REG_DIV, REG_TAC};
 
 pub use crate::interrupts::{INTERRUPT_MASK, REG_IE, REG_IF};
@@ -27,21 +29,15 @@ const OAM_START: u16 = 0xFE00;
 const OAM_END: u16 = 0xFE9F;
 const UNUSABLE_START: u16 = 0xFEA0;
 const UNUSABLE_END: u16 = 0xFEFF;
-const IO_START: u16 = 0xFF00;
 const IO_END: u16 = 0xFF7F;
 const HRAM_START: u16 = 0xFF80;
 const HRAM_END: u16 = 0xFFFE;
 
 // I/O registers.
-/// Serial transfer data and control (Pan Docs "Serial Data Transfer").
-pub const REG_SB: u16 = 0xFF01;
-/// Current scanline. Will belong to the PPU in phase 3.
-pub const REG_LY: u16 = 0xFF44;
 const DOCTOR_LY: u8 = 0x90;
 /// T-cycles per scanline and scanlines per frame (Pan Docs "Rendering": 456 dots x 154 lines).
 const STUB_LINE_CYCLES: u64 = 456;
 const STUB_LINES: u64 = 154;
-pub const REG_SC: u16 = 0xFF02;
 /// SC value that starts a transfer using the internal clock.
 const SC_START_INTERNAL_CLOCK: u8 = 0x81;
 
@@ -52,7 +48,7 @@ pub struct Bus {
     oam: [u8; 0xA0],
     hram: [u8; 0x7F],
     /// Plain storage for I/O registers that have no behaviour yet.
-    io: [u8; 0x80],
+    io: [u8; IO_LEN],
     interrupts: Interrupts,
     /// Total T-cycles since power-on.
     cycles: u64,
@@ -77,7 +73,7 @@ impl Bus {
             wram: [0; 0x2000],
             oam: [0; 0xA0],
             hram: [0; 0x7F],
-            io: [0; 0x80],
+            io: std::array::from_fn(|i| io::power_up_value(IO_START + i as u16)),
             interrupts: Interrupts::new(),
             cycles: 0,
             timer: Timer::new(),
@@ -162,7 +158,7 @@ impl Bus {
             REG_DIV..=REG_TAC => self.timer.read(addr),
             REG_LY if self.doctor_mode => DOCTOR_LY,
             REG_LY if self.ly_stub => ((self.cycles / STUB_LINE_CYCLES) % STUB_LINES) as u8,
-            _ => self.io[(addr - IO_START) as usize],
+            _ => self.io[(addr - IO_START) as usize] | io::read_mask(addr),
         }
     }
 

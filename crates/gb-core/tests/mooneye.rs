@@ -35,7 +35,6 @@ fn acceptance_interrupts() {
     sweep(&format!("{MOONEYE}/acceptance/interrupts"));
 }
 #[test]
-#[ignore = "phase 2 in progress: un-ignore when this area is implemented"]
 fn acceptance_bits() {
     sweep(&format!("{MOONEYE}/acceptance/bits"));
 }

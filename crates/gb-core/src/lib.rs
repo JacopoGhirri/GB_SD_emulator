@@ -7,6 +7,7 @@ pub mod bus;
 pub mod cartridge;
 pub mod cpu;
 pub mod interrupts;
+pub mod io;
 pub mod mooneye;
 pub mod timer;
 
