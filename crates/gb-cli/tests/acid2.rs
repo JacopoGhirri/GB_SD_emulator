@@ -61,3 +61,39 @@ fn dmg_acid2_comparison_detects_a_wrong_frame() {
         "a 1-frame screenshot must not match the reference"
     );
 }
+
+/// scribbltests that ship a DMG-valid reference screenshot (PPU register timing per line).
+/// (rom directory, rom file, reference png) relative to `scribbltests/`.
+const SCRIBBL: &[(&str, &str, &str)] = &[
+    ("lycscx", "lycscx.gb", "lycscx-cgb-dmg.png"),
+    ("lycscy", "lycscy.gb", "lycscy-cgb-dmg.png"),
+    ("scxly", "scxly.gb", "scxly-dmg.png"),
+    ("palettely", "palettely.gb", "palettely-dmg.png"),
+];
+
+#[test]
+fn scribbltests_match_their_references() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/roms/game-boy-test-roms-v7.0/scribbltests");
+    for (dir, rom, png) in SCRIBBL {
+        let (rom, png) = (root.join(dir).join(rom), root.join(dir).join(png));
+        if !rom.exists() || !png.exists() {
+            println!("SKIP: scribbltests/{dir} not found. Run scripts/fetch_test_roms.sh.");
+            continue;
+        }
+        let out = Command::new(env!("CARGO_BIN_EXE_gb-cli"))
+            .arg("run")
+            .arg(&rom)
+            .args(["--frames", "120", "--compare"])
+            .arg(&png)
+            .output()
+            .expect("failed to run gb-cli");
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        println!("scribbltests/{dir}: {}", text.lines().last().unwrap_or(""));
+        assert!(out.status.success(), "scribbltests/{dir} differs:\n{text}");
+    }
+}
