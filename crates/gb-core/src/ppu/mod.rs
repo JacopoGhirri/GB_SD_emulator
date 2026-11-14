@@ -5,6 +5,7 @@
 //! 456 dots = 70224 dots (~59.7 Hz). Lines 0..=143 are visible, 144..=153 are VBlank.
 
 pub mod debug;
+mod render;
 
 use crate::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
@@ -79,6 +80,10 @@ pub struct Ppu {
     /// Last value of the shared STAT interrupt line (see `stat_line`).
     stat_line: bool,
     frame_ready: bool,
+    /// Window's internal line counter: which window row to draw next. Reset every frame.
+    window_line: u8,
+    /// Frame being drawn; copied to `framebuffer` at VBlank so a half-drawn frame is never shown.
+    back: Vec<u32>,
     framebuffer: Vec<u32>,
 }
 
@@ -111,6 +116,8 @@ impl Ppu {
             first_line_after_on: false,
             stat_line: false,
             frame_ready: false,
+            window_line: 0,
+            back: vec![SHADES[0]; SCREEN_WIDTH * SCREEN_HEIGHT],
             framebuffer: vec![SHADES[0]; SCREEN_WIDTH * SCREEN_HEIGHT],
         }
     }
@@ -200,6 +207,9 @@ impl Ppu {
             return irq;
         }
         self.dot += 4;
+        if self.dot == OAM_SCAN_DOTS + DRAW_DOTS && self.ly < FIRST_VBLANK_LINE {
+            self.render_line();
+        }
         if self.dot >= DOTS_PER_LINE {
             self.dot -= DOTS_PER_LINE;
             self.first_line_after_on = false;
@@ -210,6 +220,8 @@ impl Ppu {
             if self.ly == FIRST_VBLANK_LINE {
                 irq.vblank = true;
                 self.frame_ready = true;
+                self.framebuffer.copy_from_slice(&self.back);
+                self.window_line = 0;
             }
         }
         irq.stat = self.update_stat_line();
@@ -317,6 +329,8 @@ impl Ppu {
             self.dot = 0;
             self.off_dots = 0;
             self.framebuffer.fill(SHADES[0]);
+            self.back.fill(SHADES[0]);
+            self.window_line = 0;
         } else if !was_on && now_on {
             // Turning it on restarts the frame at line 0 (first line is special, see field).
             self.ly = 0;
