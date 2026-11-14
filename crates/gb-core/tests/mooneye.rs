@@ -43,3 +43,35 @@ fn emulator_only_mbc1() {
 fn emulator_only_mbc5() {
     sweep(&format!("{MOONEYE}/emulator-only/mbc5"));
 }
+
+/// Phase 3: `acceptance/ppu` is recorded, not gated (cycle-exact mode 3 is out of scope).
+/// The ROMs in `PPU_MUST_PASS` pass today and must keep passing; the rest are printed only.
+const PPU_MUST_PASS: &[&str] = &[
+    "intr_1_2_timing-GS.gb",
+    "intr_2_0_timing.gb",
+    "intr_2_mode0_timing.gb",
+    "intr_2_mode3_timing.gb",
+    "intr_2_oam_ok_timing.gb",
+    "stat_irq_blocking.gb",
+];
+
+#[test]
+fn acceptance_ppu_recorded() {
+    let Some(results) = common::mooneye_sweep(&format!("{MOONEYE}/acceptance/ppu"), BUDGET) else {
+        return;
+    };
+    for (name, pass, text) in &results {
+        println!(
+            "PPU-RESULT {name}: {} ({text})",
+            if *pass { "PASS" } else { "FAIL" }
+        );
+    }
+    let regressed: Vec<_> = PPU_MUST_PASS
+        .iter()
+        .filter(|n| results.iter().any(|(name, pass, _)| name == *n && !pass))
+        .collect();
+    assert!(
+        regressed.is_empty(),
+        "PPU ROMs that used to pass now fail: {regressed:?}"
+    );
+}
