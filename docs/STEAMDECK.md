@@ -77,3 +77,8 @@ appear there, because the script redirects stdout and stderr to it.
 - Left stick (not tested) and View/Select (not reported). Confirmed: D-pad, Deck A = GB A, Deck B = GB B, Menu (three lines) = Start.
 - `--fullscreen` itself in Game Mode (not needed: the game already opens full screen in Game Mode without it).
 - Cause of the original instant close (section 4).
+
+## 9. Sound (phase 6, untested on the Deck)
+- `gb-sdl` opens the default SDL audio device (48 kHz stereo) and paces the game by the audio clock. If the Deck has no usable audio device it prints a warning and falls back to timer pacing.
+- Keys (Desktop Mode): `1`-`4` mute channels 1-4, `+`/`-` volume. `--no-audio` turns sound off. On exit it prints one line of queue statistics (underruns should be 0).
+- **Unconfirmed:** crackle or lag in Game Mode. If it crackles, tell me and send the "audio:" line from `~/gb_log.txt`.
