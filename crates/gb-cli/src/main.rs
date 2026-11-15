@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use gb_core::input_script::InputScript;
 use gb_core::mooneye::{run_mooneye, MooneyeVerdict};
 use gb_core::{Cartridge, GameBoy, Model};
 
@@ -85,6 +86,23 @@ struct RunArgs {
     #[arg(long, value_name = "FILE")]
     dump_bgmap_9c00: Option<PathBuf>,
 
+    /// Replay button presses from an input script (see gb_core::input_script). Frame counting
+    /// starts at boot. Without --frames, runs for the script's `# end N` length.
+    #[arg(long, value_name = "FILE")]
+    input: Option<PathBuf>,
+
+    /// Print the framebuffer hash after each of these frame counts (comma-separated).
+    #[arg(long, value_name = "N,N,...", value_delimiter = ',')]
+    hash_at: Vec<u64>,
+
+    /// Write a PNG after each of these frame counts (comma-separated) into --screenshot-dir.
+    #[arg(long, value_name = "N,N,...", value_delimiter = ',')]
+    screenshot_at: Vec<u64>,
+
+    /// Directory for --screenshot-at PNGs, named frame-<N>.png.
+    #[arg(long, value_name = "DIR")]
+    screenshot_dir: Option<PathBuf>,
+
     /// Write a Gameboy Doctor trace, one line per instruction (needs --max-instructions).
     /// Also makes LY read 0x90 and IF read without its unused bits, as Doctor expects.
     #[arg(long, value_name = "FILE")]
@@ -161,7 +179,27 @@ fn run(args: &RunArgs) -> u8 {
             }
         };
     }
-    let needs_run = args.frames.is_some() || args.max_instructions.is_some();
+    let script = match &args.input {
+        Some(path) => match std::fs::read_to_string(path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| InputScript::parse(&text))
+        {
+            Ok(script) => Some(script),
+            Err(e) => {
+                eprintln!("error: input script {}: {e}", path.display());
+                return EXIT_FAILED;
+            }
+        },
+        None => None,
+    };
+    if !args.screenshot_at.is_empty() && args.screenshot_dir.is_none() {
+        eprintln!("error: --screenshot-at needs --screenshot-dir");
+        return EXIT_UNSUPPORTED;
+    }
+    let frames = args
+        .frames
+        .or_else(|| script.as_ref().and_then(InputScript::end));
+    let needs_run = frames.is_some() || args.max_instructions.is_some();
     if !needs_run {
         // Header-only mode: no stop condition was given, so there is nothing to run.
         return EXIT_OK;
@@ -183,10 +221,25 @@ fn run(args: &RunArgs) -> u8 {
     let mut serial = Vec::new();
     let mut instructions: u64 = 0;
 
-    if let Some(frames) = args.frames {
-        for _ in 0..frames {
+    if let Some(frames) = frames {
+        for frame in 0..frames {
+            if let Some(script) = &script {
+                gb.set_buttons(script.buttons_at(frame));
+            }
             gb.run_frame();
             serial.extend(gb.take_serial());
+            let done = frame + 1;
+            if args.hash_at.contains(&done) {
+                println!("frame {done}: hash {:016x}", gb.framebuffer_hash());
+            }
+            if let (true, Some(dir)) = (args.screenshot_at.contains(&done), &args.screenshot_dir) {
+                let path = dir.join(format!("frame-{done}.png"));
+                if let Err(e) = image::write_png(&path, gb.framebuffer()) {
+                    eprintln!("error: writing {}: {e}", path.display());
+                    return EXIT_FAILED;
+                }
+                println!("screenshot written to {}", path.display());
+            }
         }
     }
     if let Some(max) = args.max_instructions {

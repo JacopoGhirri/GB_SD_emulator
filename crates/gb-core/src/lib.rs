@@ -7,6 +7,7 @@ pub mod bus;
 pub mod cartridge;
 pub mod cpu;
 pub mod dma;
+pub mod input_script;
 pub mod interrupts;
 pub mod io;
 pub mod joypad;
@@ -110,6 +111,19 @@ impl GameBoy {
     /// 160*144 pixels, 0x00RRGGBB.
     pub fn framebuffer(&self) -> &[u32] {
         self.bus.ppu().framebuffer()
+    }
+
+    /// FNV-1a hash of the visible framebuffer. Used to pin "this frame looks like what the owner
+    /// approved" in local ROM tests without storing images of commercial games.
+    pub fn framebuffer_hash(&self) -> u64 {
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        for px in self.framebuffer() {
+            for b in px.to_le_bytes() {
+                h ^= u64::from(b);
+                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        h
     }
 
     /// Held buttons (bit set = pressed, see [`Buttons`] constants).
