@@ -31,8 +31,10 @@ fn wav_dump_is_valid_and_not_silent() {
     assert_eq!(&wav[0..4], b"RIFF");
     assert_eq!(&wav[8..12], b"WAVE");
     let samples: Vec<i16> = wav[44..]
-        .chunks_exact(2)
-        .map(|b| i16::from_le_bytes([b[0], b[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|b| i16::from_le_bytes(*b))
         .collect();
     // 120 frames at 59.73 Hz = about 2.0 s of 48 kHz stereo.
     assert!(samples.len() / 2 > 90_000, "{} frames", samples.len() / 2);
