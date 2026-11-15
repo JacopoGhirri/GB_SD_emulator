@@ -36,6 +36,10 @@ const OAM_END: u16 = 0xFE9F;
 const UNUSABLE_START: u16 = 0xFEA0;
 const UNUSABLE_END: u16 = 0xFEFF;
 const IO_END: u16 = 0xFF7F;
+const WRAM_SIZE: usize = 0x8000;
+const WRAM_BANK_SIZE: usize = 0x1000;
+/// SVBK: WRAM bank select, CGB mode only (Pan Docs "WRAM Bank Select").
+const REG_SVBK: u16 = 0xFF70;
 const HRAM_START: u16 = 0xFF80;
 const HRAM_END: u16 = 0xFFFE;
 
@@ -46,7 +50,11 @@ pub struct Bus {
     cartridge: Cartridge,
     ppu: Ppu,
     apu: Apu,
-    wram: [u8; 0x2000],
+    /// 8 banks of 4 KiB. Bank 0 is always at 0xC000; 0xD000 shows bank `svbk` (1..=7).
+    /// On DMG only banks 0 and 1 are used, which is the plain 8 KiB.
+    wram: [u8; WRAM_SIZE],
+    /// SVBK (0xFF70) bits 0..=2 as written; 0 selects bank 1 (see `wram_index`). CGB mode only.
+    svbk: u8,
     hram: [u8; 0x7F],
     /// Plain storage for I/O registers that have no behaviour yet.
     io: [u8; IO_LEN],
@@ -75,12 +83,15 @@ impl Bus {
     /// `cgb_mode` must already combine the hardware model with the cartridge header
     /// (see `GameBoy::new`).
     pub fn with_mode(cartridge: Cartridge, cgb_mode: bool) -> Bus {
+        let mut ppu = Ppu::new();
+        ppu.set_cgb(cgb_mode);
         Bus {
             cgb_mode,
             cartridge,
-            ppu: Ppu::new(),
+            ppu,
             apu: Apu::new(),
-            wram: [0; 0x2000],
+            wram: [0; WRAM_SIZE],
+            svbk: 0,
             hram: [0; 0x7F],
             io: std::array::from_fn(|i| io::power_up_value(IO_START + i as u16)),
             interrupts: Interrupts::new(),
@@ -189,9 +200,9 @@ impl Bus {
             0..=ROM_END => self.cartridge.read_rom(addr),
             VRAM_START..=VRAM_END => self.ppu.read_vram((addr - VRAM_START) as usize),
             EXT_RAM_START..=EXT_RAM_END => self.cartridge.read_ram(addr),
-            WRAM_START..=WRAM_END => self.wram[(addr - WRAM_START) as usize],
-            // Echo RAM mirrors WRAM (0xE000 maps to 0xC000).
-            ECHO_START..=ECHO_END => self.wram[(addr - ECHO_START) as usize],
+            WRAM_START..=WRAM_END => self.wram[self.wram_index(addr - WRAM_START)],
+            // Echo RAM mirrors WRAM (0xE000 maps to 0xC000), banking included.
+            ECHO_START..=ECHO_END => self.wram[self.wram_index(addr - ECHO_START)],
             OAM_START..=OAM_END => self.ppu.read_oam((addr - OAM_START) as usize),
             UNUSABLE_START..=UNUSABLE_END => 0xFF,
             IO_START..=IO_END => self.read_io(addr),
@@ -205,13 +216,31 @@ impl Bus {
             0..=ROM_END => self.cartridge.write_rom(addr, value),
             VRAM_START..=VRAM_END => self.ppu.write_vram((addr - VRAM_START) as usize, value),
             EXT_RAM_START..=EXT_RAM_END => self.cartridge.write_ram(addr, value),
-            WRAM_START..=WRAM_END => self.wram[(addr - WRAM_START) as usize] = value,
-            ECHO_START..=ECHO_END => self.wram[(addr - ECHO_START) as usize] = value,
+            WRAM_START..=WRAM_END => {
+                let i = self.wram_index(addr - WRAM_START);
+                self.wram[i] = value;
+            }
+            ECHO_START..=ECHO_END => {
+                let i = self.wram_index(addr - ECHO_START);
+                self.wram[i] = value;
+            }
             OAM_START..=OAM_END => self.ppu.write_oam((addr - OAM_START) as usize, value),
             UNUSABLE_START..=UNUSABLE_END => {}
             IO_START..=IO_END => self.write_io(addr, value),
             HRAM_START..=HRAM_END => self.hram[(addr - HRAM_START) as usize] = value,
             REG_IE => self.interrupts.write_enable(value),
+        }
+    }
+
+    /// Index into `wram` for an offset 0..0x2000 from 0xC000. The upper 4 KiB shows the bank
+    /// selected by SVBK, where 0 means 1 (Pan Docs "WRAM Bank Select").
+    fn wram_index(&self, offset: u16) -> usize {
+        let offset = usize::from(offset);
+        if offset < WRAM_BANK_SIZE {
+            offset
+        } else {
+            let bank = usize::from(self.svbk.max(1));
+            bank * WRAM_BANK_SIZE + (offset - WRAM_BANK_SIZE)
         }
     }
 
@@ -229,6 +258,8 @@ impl Bus {
             }
             REG_LY if self.doctor_mode => DOCTOR_LY,
             REG_DMA => self.io[(addr - IO_START) as usize] | io::read_mask(addr),
+            ppu::REG_VBK => self.ppu.read_vbk(),
+            REG_SVBK if self.cgb_mode => 0xF8 | self.svbk,
             ppu::REG_LCDC..=ppu::REG_WX => self.ppu.read_reg(addr),
             _ => self.io[(addr - IO_START) as usize] | io::read_mask(addr),
         }
@@ -255,6 +286,8 @@ impl Bus {
                 self.io[(addr - IO_START) as usize] = value;
                 self.dma.start(value);
             }
+            ppu::REG_VBK => self.ppu.write_vbk(value),
+            REG_SVBK if self.cgb_mode => self.svbk = value & 7,
             ppu::REG_LCDC..=ppu::REG_WX => {
                 if self.ppu.write_reg(addr, value) {
                     self.request_interrupt(Interrupt::LcdStat);
@@ -367,6 +400,64 @@ mod tests {
         assert_eq!(bus.peek(0xE123), 0x5A);
         bus.write(0xE456, 0xA5);
         assert_eq!(bus.peek(0xC456), 0xA5);
+    }
+
+    fn cgb_bus() -> Bus {
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x143] = 0x80;
+        Bus::with_mode(Cartridge::from_bytes(rom).unwrap(), true)
+    }
+
+    #[test]
+    fn cgb_wram_banks_switch_at_d000_and_zero_selects_bank_one() {
+        let mut bus = cgb_bus();
+        bus.write(0xC000, 0x11); // bank 0, always visible
+        for bank in 1..=7u8 {
+            bus.write(REG_SVBK, bank);
+            bus.write(0xD000, 0x20 + bank);
+        }
+        for bank in 1..=7u8 {
+            bus.write(REG_SVBK, bank);
+            assert_eq!(bus.peek(0xD000), 0x20 + bank, "bank {bank}");
+            assert_eq!(bus.peek(0xC000), 0x11);
+            assert_eq!(bus.peek(0xF000), 0x20 + bank, "echo follows the bank");
+        }
+        bus.write(REG_SVBK, 0);
+        assert_eq!(bus.peek(0xD000), 0x21, "0 selects bank 1");
+        assert_eq!(
+            bus.peek(REG_SVBK),
+            0xF8,
+            "unused bits read 1, bits 0-2 as written"
+        );
+        bus.write(REG_SVBK, 0xFD);
+        assert_eq!(bus.peek(REG_SVBK), 0xFD, "only bits 0-2 are stored");
+        assert_eq!(bus.peek(0xD000), 0x25);
+    }
+
+    #[test]
+    fn cgb_vram_banks_are_separate() {
+        let mut bus = cgb_bus();
+        bus.write(0x8000, 0xAA);
+        bus.write(ppu::REG_VBK, 1);
+        assert_eq!(bus.peek(0x8000), 0, "bank 1 starts empty");
+        bus.write(0x8000, 0xBB);
+        assert_eq!(bus.peek(ppu::REG_VBK), 0xFF);
+        assert_eq!(bus.ppu().vram()[0], 0xAA);
+        assert_eq!(bus.ppu().vram_bank1()[0], 0xBB);
+        bus.write(ppu::REG_VBK, 0);
+        assert_eq!(bus.peek(0x8000), 0xAA);
+        assert_eq!(bus.peek(ppu::REG_VBK), 0xFE);
+    }
+
+    #[test]
+    fn dmg_has_no_bank_registers() {
+        let mut bus = test_bus();
+        bus.write(REG_SVBK, 3);
+        bus.write(ppu::REG_VBK, 1);
+        assert_eq!(bus.peek(REG_SVBK), 0xFF);
+        assert_eq!(bus.peek(ppu::REG_VBK), 0xFF);
+        bus.write(0x8000, 0x77);
+        assert_eq!(bus.ppu().vram()[0], 0x77, "VBK ignored: still bank 0");
     }
 
     #[test]

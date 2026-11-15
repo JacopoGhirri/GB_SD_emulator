@@ -55,8 +55,19 @@ pub struct PpuIrq {
     pub stat: bool,
 }
 
+/// VBK (0xFF4F): VRAM bank select, CGB mode only (Pan Docs "VRAM Banks"). Bit 0 selects the
+/// bank; the other bits read as 1.
+pub const REG_VBK: u16 = 0xFF4F;
+
 pub struct Ppu {
+    /// VRAM bank 0 (tile data and the tile maps).
     vram: [u8; VRAM_SIZE],
+    /// VRAM bank 1 (CGB only): more tile data, and the BG map *attributes* at 0x9800/0x9C00.
+    vram1: [u8; VRAM_SIZE],
+    /// Bank the CPU sees at 0x8000..=0x9FFF (VBK bit 0). The renderer picks banks per tile.
+    vbk: u8,
+    /// CGB mode: VBK works. In DMG mode VBK reads 0xFF and writes are ignored.
+    cgb: bool,
     oam: [u8; OAM_SIZE],
     lcdc: u8,
     /// Only the four writable STAT bits (3..=6); mode and LYC flag are computed.
@@ -98,6 +109,9 @@ impl Ppu {
     pub fn new() -> Ppu {
         Ppu {
             vram: [0; VRAM_SIZE],
+            vram1: [0; VRAM_SIZE],
+            vbk: 0,
+            cgb: false,
             oam: [0; OAM_SIZE],
             lcdc: 0x91,
             stat_enable: 0,
@@ -119,6 +133,26 @@ impl Ppu {
             window_line: 0,
             back: vec![SHADES[0]; SCREEN_WIDTH * SCREEN_HEIGHT],
             framebuffer: vec![SHADES[0]; SCREEN_WIDTH * SCREEN_HEIGHT],
+        }
+    }
+
+    /// Switch on CGB behaviour (called once by the bus when the console is built).
+    pub fn set_cgb(&mut self, cgb: bool) {
+        self.cgb = cgb;
+    }
+
+    /// Read VBK (0xFF4F). Unused bits read 1; the register does not exist on DMG.
+    pub fn read_vbk(&self) -> u8 {
+        if self.cgb {
+            0xFE | self.vbk
+        } else {
+            0xFF
+        }
+    }
+
+    pub fn write_vbk(&mut self, value: u8) {
+        if self.cgb {
+            self.vbk = value & 1;
         }
     }
 
@@ -240,20 +274,35 @@ impl Ppu {
 
     // --- Memory access. Access blocking by mode is added on top of these (see `Bus::read`). ---
 
+    /// VRAM bank 0.
     pub fn vram(&self) -> &[u8] {
         &self.vram
+    }
+
+    /// VRAM bank 1 (all zero unless the game uses CGB mode).
+    pub fn vram_bank1(&self) -> &[u8] {
+        &self.vram1
     }
 
     pub fn oam(&self) -> &[u8] {
         &self.oam
     }
 
+    /// CPU/DMA view of VRAM: the bank chosen by VBK (always bank 0 outside CGB mode).
     pub fn read_vram(&self, offset: usize) -> u8 {
-        self.vram[offset]
+        if self.vbk == 1 {
+            self.vram1[offset]
+        } else {
+            self.vram[offset]
+        }
     }
 
     pub fn write_vram(&mut self, offset: usize, value: u8) {
-        self.vram[offset] = value;
+        if self.vbk == 1 {
+            self.vram1[offset] = value;
+        } else {
+            self.vram[offset] = value;
+        }
     }
 
     pub fn read_oam(&self, offset: usize) -> u8 {

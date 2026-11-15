@@ -455,3 +455,15 @@ Wall time is 4.8 % *shorter* than nominal in both runs, with identical queue sta
 - Steam Deck audio check from phase 6 is deferred, to be done in the same Deck session as phase 7 (see "Phase 6").
 - **New phase 9: Game Boy Advance**, a separate `gba-core` with its own gate, placed after phase 8. CLAUDE.md non-goals/stack/index updated; `bios/` gitignored; GBA references added to `docs/REFERENCES.md`. Defaults to confirm with the owner at the start of phase 9: separate crates `gba-core`/`gba-cli`, one frontend that picks the core by file extension, HLE BIOS with an optional owner-supplied BIOS dump, and the list of GBA games the owner wants working (human gate).
 - The repo-wide rule "do not start the next phase before the gate passes" still holds; phase 9 does not start before phase 8 unless the owner reorders.
+
+## Phase 7 — CGB: status (in progress, started 2026-11-15)
+Environment as before (WSL Ubuntu, rustc 1.100.0). Plan: tasks 1-10 in the approved plan; one commit per task.
+
+- [x] Task 1: CGB mode = CGB hardware + CGB-capable header; `gb-cli`/`gb-sdl` pick the model from the header (`GameBoy::default_model_for`); `--model` overrides. Commit `067c0df`.
+- [x] Task 2: CGB and DMG-compat post-boot CPU registers. Commit `af85bc5`.
+- [x] Task 3: VRAM bank (VBK FF4F, `Ppu::vram1`) and 8 x 4 KiB WRAM banks (SVBK FF70); DMG ignores both. 3 new unit tests. Full `cargo test --workspace` re-run (WSL): every suite ok, 0 failed (gb-core unit 140, doctor_trace 11, pokemon_local 2, mooneye 7, cpu_instrs 12, ... gb-sdl 20); clippy `--all-targets -D warnings` clean.
+
+### Phase 7 open follow-ups (record and revisit)
+- **Mooneye CGB boot ROMs fail** (`misc/boot_regs-cgb`, `boot_div-cgb0`, `boot_div-cgbABCDE`, `boot_hwio-C`): all print `mooneye: FAIL after ~93-95k instructions, B..L = 42`. Cause not yet known (the register values did not change the failing instruction count of `boot_regs-cgb`, 94358). **Re-run after task 7 and record the exact failing check here**, so it is a defined phase-8 follow-up if still failing.
+- **DMG-compat register values come from one ROM's expected table** (`boot_regs-cgb`: AF=1180 BC=0000 DE=0008 HL=007C, `Registers::post_boot_cgb_compat`). The real CGB boot ROM derives B/DE/HL from a hash of the title, so other DMG-only titles may expect different values. Not modelled.
+- Full `cargo test --workspace` must be re-run at the end of task 3 (commit 2 only re-ran gb-core unit tests).
