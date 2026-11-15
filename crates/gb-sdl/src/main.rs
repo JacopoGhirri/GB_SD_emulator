@@ -3,6 +3,7 @@
 //! One thread: poll SDL events once per frame, set the buttons, `run_frame()`, draw, flush the
 //! save if due, then wait for the frame deadline (see `pacing`).
 
+mod audio;
 mod input;
 mod pacing;
 mod save;
@@ -20,11 +21,12 @@ use sdl2::rect::Rect;
 use sdl2::video::FullscreenType;
 
 const USAGE: &str =
-    "usage: gb-sdl <rom.gb> [--scale N] [--fullscreen] [--swap-ab] [--frames N] [--record FILE]\n\
+    "usage: gb-sdl <rom.gb> [--scale N] [--fullscreen] [--swap-ab] [--frames N] [--record FILE] [--no-audio]\n\
   --scale N      initial window scale (default 4)\n\
   --fullscreen   start fullscreen (F11 toggles)\n\
   --swap-ab      swap the gamepad face buttons (default: east = B, south = A)\n\
   --frames N     run N frames (paced) then quit, for smoke testing\n\
+  --no-audio     no sound; pace the game with a timer instead of the audio clock\n\
   --record FILE  write your button presses, by frame, to FILE (replay with gb-cli --input).\n\
                  Starts from a fresh boot and neither reads nor writes the .sav file.";
 
@@ -35,6 +37,7 @@ struct Args {
     swap_ab: bool,
     frames: Option<u64>,
     record: Option<PathBuf>,
+    no_audio: bool,
 }
 
 fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -46,6 +49,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         swap_ab: false,
         frames: None,
         record: None,
+        no_audio: false,
     };
     let mut it = args;
     while let Some(a) = it.next() {
@@ -67,6 +71,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             }
             "--fullscreen" => out.fullscreen = true,
             "--swap-ab" => out.swap_ab = true,
+            "--no-audio" => out.no_audio = true,
             "-h" | "--help" => return Err(String::new()),
             s if s.starts_with('-') => return Err(format!("unknown option {s}")),
             _ => {
@@ -122,6 +127,23 @@ fn run(args: Args) -> Result<(), String> {
     let sdl = sdl2::init()?;
     let video = sdl.video()?;
     let controllers = sdl.game_controller()?;
+    // Audio is optional: without a device we fall back to timer pacing instead of failing.
+    let mut audio = if args.no_audio {
+        None
+    } else {
+        match sdl.audio().and_then(|a| audio::Audio::open(&a)) {
+            Ok(a) => Some(a),
+            Err(e) => {
+                eprintln!("warning: no audio ({e}); using timer pacing");
+                None
+            }
+        }
+    };
+    if let Some(a) = &audio {
+        gb.set_sample_rate(a.sample_rate());
+    }
+    let mut muted_channels: u8 = 0;
+    let mut audio_scratch: Vec<f32> = Vec::new();
     let (w, h) = (
         SCREEN_WIDTH as u32 * args.scale,
         SCREEN_HEIGHT as u32 * args.scale,
@@ -176,6 +198,20 @@ fn run(args: Args) -> Result<(), String> {
                         win.set_fullscreen(next)?;
                     } else if k == input::KEY_FAST_FORWARD {
                         fast_forward = true;
+                    } else if let Some(ch) = input::mute_channel(k) {
+                        muted_channels ^= 1 << ch;
+                        gb.set_muted_channels(muted_channels);
+                        let state = if muted_channels & (1 << ch) != 0 {
+                            "muted"
+                        } else {
+                            "on"
+                        };
+                        eprintln!("channel {} {state}", ch + 1);
+                    } else if let Some(up) = input::volume_key(k) {
+                        if let Some(a) = audio.as_mut() {
+                            a.volume = audio::step_volume(a.volume, up);
+                            eprintln!("volume {:.0}%", a.volume * 100.0);
+                        }
                     } else {
                         input.key(k, true);
                     }
@@ -250,7 +286,15 @@ fn run(args: Args) -> Result<(), String> {
         if args.frames.is_some_and(|n| frame_count >= n) {
             break;
         }
-        pacer.wait_for_next_frame(fast_forward);
+        // Audio-driven pacing when a device is open; otherwise the timer pacer.
+        match audio.as_mut() {
+            Some(a) if fast_forward => a.discard(&mut gb, &mut audio_scratch),
+            Some(a) => a.push_and_wait(&mut gb, &mut audio_scratch),
+            None => pacer.wait_for_next_frame(fast_forward),
+        }
+    }
+    if let Some(a) = &audio {
+        a.report();
     }
 
     if let Some(rec) = recording.as_mut() {

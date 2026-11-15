@@ -21,6 +21,26 @@ pub const KEY_QUIT: Keycode = Keycode::Escape;
 pub const KEY_FULLSCREEN: Keycode = Keycode::F11;
 pub const KEY_FAST_FORWARD: Keycode = Keycode::Tab;
 
+/// Keys 1-4 mute/unmute sound channels 1-4 (debugging aid). Returns the channel index 0..=3.
+pub fn mute_channel(key: Keycode) -> Option<u8> {
+    match key {
+        Keycode::Num1 => Some(0),
+        Keycode::Num2 => Some(1),
+        Keycode::Num3 => Some(2),
+        Keycode::Num4 => Some(3),
+        _ => None,
+    }
+}
+
+/// `+`/`=` raise and `-` lowers the volume (Some(true) = up).
+pub fn volume_key(key: Keycode) -> Option<bool> {
+    match key {
+        Keycode::Plus | Keycode::Equals | Keycode::KpPlus => Some(true),
+        Keycode::Minus | Keycode::KpMinus => Some(false),
+        _ => None,
+    }
+}
+
 /// Gamepad buttons that do not depend on the A/B swap. SDL names face buttons by physical
 /// position (A = south, B = east), independent of the printed label.
 pub const PAD_MAP: &[(Button, u8)] = &[
