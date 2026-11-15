@@ -366,3 +366,23 @@ Yellow dropped from scope by owner decision (no ROM, won't use it). `roms/` hold
 - Determinism check: same script replayed twice on Red gave identical hashes (`frame 200: 6b70ab86acc6fafa`, `frame 400: 4d2cb65c748170f7`).
 
 Next (needs the owner): record a new-game playthrough with `gb-sdl --record`.
+
+### Phase 5 — Red recording #1 (2026-11-15)
+- Owner played ~13.6 min from a fresh boot with `gb-sdl --record` (48,789 frames): new game, Oak intro, name entry, rival fight (won), Rattata fight (won), fled from wild Pidgey and Rattata. Owner reports no glitches; sprites appear a moment after entering a map (very likely normal Gen 1 behaviour, not confirmed against another emulator).
+- Replay is deterministic (twice: final hash `54ccc208a5b8d74f`). I viewed screenshots at frames 3000 (Oak: "So your name is RED!"), 10000 (Pallet Town), 25000 (rival fight, Squirtle 4/22, "RED defeat…"), 48789 (grass area with sign and ledge). Owner confirmed these match the session.
+- Approved hashes (frames 3000/10000/25000/48789) are in `tests/expected/local/pokemon_red.hashes`, script in `pokemon_red.input`.
+```
+$ cargo test -p gb-core --test pokemon_local -- --nocapture
+pokemon_red: 4 hashes match after 48789 frames
+test result: ok. 2 passed; 0 failed   (24.17 s)
+```
+- **Soak (partial):** that 13.6-minute replay ran to the end with no panic or hang, so the "10+ minutes" requirement is met for Red. Not yet done for Blue.
+- **Per-game hack grep:** searched `crates/` for "pokemon" and for `title ==`/`.title` uses. Only hits: header parsing, one unit-test fixture titled "POKEMON RED", and printing the title in the CLI/frontend. No per-game code.
+- **Bugs found so far:** none.
+
+### Phase 5 gate — still open
+- [ ] Owner confirms Red/Blue plays from new game through the **first gym** (recording #1 stops before Brock).
+- [ ] Save → quit → relaunch → Continue on desktop and on the Deck (done for Red in phase 4; re-confirm for this gate).
+- [x] No panics/hangs over a long scripted soak (Red, 13.6 min). Blue not run.
+- [x] No bugs fixed, so nothing to log.
+- [x] No per-game special cases (grep above).
