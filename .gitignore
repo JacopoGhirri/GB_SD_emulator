@@ -25,3 +25,6 @@ Thumbs.db
 .DS_Store
 
 # NOTE: Cargo.lock is intentionally NOT ignored. This workspace ships binaries.
+
+# BIOS dumps (GBA): never commit (CLAUDE.md section 10)
+bios/

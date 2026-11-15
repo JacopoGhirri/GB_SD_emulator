@@ -51,6 +51,6 @@ Phase 7 gate met. The human decides how deep to go on accuracy (**ask before sta
 - [ ] All CI gates green; robustness test passes.
 
 ## What's next (for the human, not the agent)
-- GBA emulator as a sequel (ARM7TDMI, Thumb, more complex PPU). Many components (cartridge handling, frontend, test harness
-  patterns, cycle-stepped design) carry over.
+- Game Boy Advance support is now **phase 9** (`docs/phases/09-gba.md`), added 2026-11-15. When doing the packaging and config
+  tasks here, keep them core-agnostic (the frontend will pick a core by file extension) so phase 9 does not have to redo them.
 - Or: use the deterministic core for ML experiments (RL agent playing Pokémon through the headless API).

@@ -1,6 +1,7 @@
 # CLAUDE.md — Game Boy Emulator (Rust)
 
-You are a builder agent working on a Game Boy / Game Boy Color emulator written in Rust.
+You are a builder agent working on a Game Boy / Game Boy Color emulator written in Rust
+(a Game Boy Advance core is added in phase 9, see `docs/phases/09-gba.md`).
 Read this file fully before every session. Then read `PROGRESS.md` to find the current phase,
 and read that phase's file in `docs/phases/`.
 
@@ -8,25 +9,29 @@ and read that phase's file in `docs/phases/`.
 
 Build an emulator that:
 1. Passes the standard community test ROMs (Blargg, Mooneye, acid2) for the DMG, then CGB.
-2. Plays Game Boy / Game Boy Color Pokémon games (Red/Blue/Yellow, Gold/Silver/Crystal) correctly,
-   including battery saves and the real-time clock.
+2. Plays Game Boy / Game Boy Color Pokémon games correctly, including battery saves and the real-time clock.
+   The owner's games are Red and Blue (phase 5) and Gold (phase 7); Yellow was dropped, and Crystal is untested
+   because the owner has no ROM for it.
 3. Runs on a Steam Deck (Linux, x86_64) with gamepad input and sound.
+4. (Phase 9, added 2026-11-15) Plays the owner's Game Boy Advance games from a separate `gba-core`,
+   with the same standards (deterministic, test-ROM driven, no per-game hacks).
 
 The human owner is an ML PhD who codes comfortably but is not a professional software engineer.
 This is a learning project: keep code readable, explain non-obvious hardware behaviour in comments,
 and prefer the simple correct design over the clever one.
 
-**Non-goals:** Game Boy Advance (separate future project), netplay, debugger GUI, shaders,
+**Non-goals:** Game Boy Advance link cable / e-Reader and other GBA extras (see phase 9 "Out of scope"), netplay, debugger GUI, shaders,
 supporting every obscure cartridge mapper, bit-perfect accuracy for obscure edge cases
 (see phase 8 for how far accuracy goes).
 
 ## 2. Tech stack
 
 - Language: Rust (stable). Edition 2021 or later.
-- Cargo workspace with three crates:
+- Cargo workspace with three crates (phase 9 adds `gba-core` and `gba-cli` under the same rules):
   - `gb-core` — the emulator. **No dependencies** (std only). No I/O, no threads, no globals, no `unsafe`.
   - `gb-cli` — headless runner used for tests and tracing. May use `png` and `clap`.
   - `gb-sdl` — desktop/Steam Deck frontend using the `sdl2` crate (video, audio, gamepad).
+  - `gba-core` / `gba-cli` — phase 9 only; do not create them earlier.
 - Adding any other dependency requires a one-line justification in `PROGRESS.md`.
 
 ## 3. Repository layout
@@ -159,7 +164,7 @@ When behaviour is wrong, in order:
   freely distributable test ROMs.
 - Do not copy source code from other emulators; their *behaviour* may be used as a reference.
   Check licences before reusing anything.
-- No boot ROM is bundled. The emulator initialises to the post-boot state directly.
+- No boot ROM or GBA BIOS is bundled, downloaded or committed. The emulator initialises to the post-boot state directly (GBA: system calls are emulated in Rust; an owner-supplied BIOS dump is optional and gitignored).
 
 ## 11. Phase index
 
@@ -172,8 +177,9 @@ When behaviour is wrong, in order:
 | 4 | `docs/phases/04-frontend-input-saves.md` | SDL window, input, saves, Steam Deck run | Homebrew/Tetris-class game playable |
 | 5 | `docs/phases/05-pokemon-red-blue.md` | Pokémon Red/Blue/Yellow compatibility | Full play session incl. save/reload |
 | 6 | `docs/phases/06-apu.md` | Audio | Blargg `dmg_sound` mostly pass, audio sounds right |
-| 7 | `docs/phases/07-cgb.md` | Game Boy Color | `cgb-acid2`, Pokémon Crystal plays |
+| 7 | `docs/phases/07-cgb.md` | Game Boy Color | `cgb-acid2`, Pokémon Gold plays |
 | 8 | `docs/phases/08-polish-accuracy.md` | Quality, packaging, accuracy scoreboard | Documented scoreboard + Deck package |
+| 9 | `docs/phases/09-gba.md` | Game Boy Advance core (`gba-core`) | gba-tests pass, owner's GBA games play on desktop and Deck |
 
 Keep `PROGRESS.md` pointing at the current phase.
 

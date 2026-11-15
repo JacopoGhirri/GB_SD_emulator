@@ -1,8 +1,11 @@
 # Phase 7 — Game Boy Color
 
 ## Goal
-Support CGB mode: colour palettes, banked VRAM/WRAM, double-speed CPU, HDMA. Pokémon Crystal (and Gold/Silver, and
-Yellow in colour) play correctly; `cgb-acid2` passes.
+Support CGB mode: colour palettes, banked VRAM/WRAM, double-speed CPU, HDMA. Pokémon Gold (the owner's CGB game; Silver
+and Crystal share its hardware needs) plays correctly; `cgb-acid2` passes.
+
+**Scope changes (owner, 2026-11-15):** the owner has Pokémon **Gold**, not Crystal, so Gold is the human gate game. Yellow in
+colour is dropped (the owner has no Yellow ROM; same decision as phase 5). Crystal/Silver are untested but need no extra features.
 
 ## Prerequisites
 Phase 6 gate met (or consciously deferred in `PROGRESS.md`). Read the CGB sections of Pan Docs:
@@ -24,7 +27,7 @@ VRAM DMA (HDMA/GDMA), Speed Switch, and the CGB power-up register values.
 8. **Double speed**: KEY1 (0xFF4D) arming + `STOP` triggers the switch. CPU, timer, DMA run at 2×; **PPU and (mostly) APU stay at normal speed**.
    Take care that your cycle-stepped `tick()` handles two clock domains.
 9. **HDMA/GDMA** (FF51–FF55): general-purpose DMA (stalls the CPU) and HBlank DMA (16 bytes per HBlank), start/cancel/status semantics.
-10. **MBC3 RTC** (Crystal/Gold/Silver): confirm wall-clock behaviour from phase 4 works with these games; add the day-counter overflow/halt flag per Pan Docs.
+10. **MBC3 RTC** (Gold/Silver/Crystal): confirm wall-clock behaviour from phase 4 works with these games; add the day-counter overflow/halt flag per Pan Docs.
 11. Infrared port (FF56), undocumented CGB registers: return documented defaults; don't crash.
 12. Run `cgb-acid2` and fix rendering until the screenshot matches.
 
@@ -34,13 +37,13 @@ VRAM DMA (HDMA/GDMA), Speed Switch, and the CGB power-up register values.
 - HBlank HDMA must only transfer while the PPU is in mode 0, and be cancellable.
 - RGB555 colour order is little-endian R,G,B in 5 bits each (`0bBBBBBGGGGGRRRRR`).
 - Tile bank selection applies per tile via attribute bit 3; the tile data addressing mode (LCDC.4) is unchanged.
-- Crystal and Gold/Silver rely heavily on HDMA and mid-frame effects; failures there usually point to PPU mode/STAT timing, not to CGB features.
+- Gold/Silver/Crystal rely heavily on HDMA and mid-frame effects; failures there usually point to PPU mode/STAT timing, not to CGB features.
 
 ## Gate (definition of done)
 - [ ] `cgb-acid2` matches its reference screenshot.
 - [ ] All DMG gates from phases 1–3 still pass in DMG mode.
 - [ ] Mooneye CGB-relevant acceptance tests: record results; Blargg `cgb_sound` recorded.
-- [ ] Human confirms Pokémon Crystal plays (new game → first town → first battle → save/reload, RTC-driven day/night behaves) on desktop and Steam Deck. Yellow runs in colour.
+- [ ] Human confirms Pokémon **Gold** plays (new game → first town → first battle → save/reload, RTC-driven day/night behaves) on desktop and Steam Deck. (Yellow in colour: dropped by owner decision, see Goal.) The Deck session also covers the Steam Deck audio check deferred from phase 6.
 - [ ] No per-game hacks.
 
 ## Out of scope

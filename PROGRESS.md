@@ -11,8 +11,9 @@
 - [x] 4 Frontend, input, saves  (gate met; minor untested items: left stick, View/Select, see "Phase 4" below)
 - [x] 5 Pokémon Red/Blue  (gate met with owner waivers: first gym not reached, Blue not separately tested; Yellow dropped by owner decision 2026-11-15: owner has no Yellow ROM and won't use it)
 - [~] 6 APU  (gate met except the Steam Deck audio check, consciously deferred by the owner 2026-11-15; dmg_sound 10 is a documented known failure, see "Phase 6")
-- [ ] 7 CGB
+- [ ] 7 CGB  (human gate game is Pokémon **Gold**; Crystal and Yellow dropped: owner has no ROMs for them, decided 2026-11-15)
 - [ ] 8 Polish / accuracy
+- [ ] 9 Game Boy Advance  (added 2026-11-15 at the owner's request, after phase 8; see `docs/phases/09-gba.md`)
 
 ## Phase 0 gate
 - [x] `cargo build --workspace` — passes (see scoreboard).
@@ -448,3 +449,9 @@ Wall time is 4.8 % *shorter* than nominal in both runs, with identical queue sta
 2. Run `gb-sdl roms/pokemon_red.gb` on desktop (WSLg): is the music right in the intro/title and in a battle, any crackle? Try keys 1-4 and +/-. Quit normally and send me the printed `audio:` line.
 3. Same on the Steam Deck (Game Mode: the line lands in `~/gb_log.txt`).
 4. Decide whether you want more effort on dmg_sound 10 (I recommend not).
+
+## Scope decisions (owner, 2026-11-15)
+- Phase 7 human gate uses Pokémon **Gold** (owner has no Crystal); Yellow in colour dropped. Phase 7 and CLAUDE.md updated.
+- Steam Deck audio check from phase 6 is deferred, to be done in the same Deck session as phase 7 (see "Phase 6").
+- **New phase 9: Game Boy Advance**, a separate `gba-core` with its own gate, placed after phase 8. CLAUDE.md non-goals/stack/index updated; `bios/` gitignored; GBA references added to `docs/REFERENCES.md`. Defaults to confirm with the owner at the start of phase 9: separate crates `gba-core`/`gba-cli`, one frontend that picks the core by file extension, HLE BIOS with an optional owner-supplied BIOS dump, and the list of GBA games the owner wants working (human gate).
+- The repo-wide rule "do not start the next phase before the gate passes" still holds; phase 9 does not start before phase 8 unless the owner reorders.

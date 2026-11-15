@@ -51,3 +51,11 @@ Other sources (not used yet): `retrio/gb-test-roms`, `Gekkio/mooneye-test-suite`
   RAM size 0x149, header checksum 0x14D.
 - Pokémon cart types: Red/Blue = MBC3+RAM+BATTERY (0x13); Yellow = MBC5+RAM+BATTERY (0x1B);
   Gold/Silver/Crystal = MBC3+TIMER+RAM+BATTERY (0x10). Confirm from the header, do not hardcode.
+
+## Game Boy Advance (phase 9; verify each URL on first use)
+- **GBATEK** (the canonical GBA/DS reference): https://problemkaputt.de/gbatek.htm  (CPU, memory map, I/O, DMA, timers, PPU, sound, BIOS functions, save media, GPIO/RTC).
+- **ARM7TDMI Technical Reference Manual** (ARM DDI 0029) for instruction semantics; cross-check against GBATEK.
+- **Tonc** (video hardware tutorial): https://www.coranac.com/tonc/text/
+- **Test ROMs:** `jsmolka/gba-tests` (arm, thumb, memory, bios, save and video demos), `mgba-emu/suite` (timing, DMA, timers, I/O), armwrestler-gba. Fetch with a pinned release plus SHA-256, like `scripts/fetch_test_roms.sh`; do not assume pass criteria, read each suite README.
+- **Reference emulators** (behaviour only, no code copying): mGBA, NanoBoyAdvance, SkyEmu.
+- **Legal:** the GBA BIOS is copyrighted; never download or commit it (see phase 9 BIOS policy).
