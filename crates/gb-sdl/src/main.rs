@@ -19,11 +19,14 @@ use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::Rect;
 use sdl2::video::FullscreenType;
 
-const USAGE: &str = "usage: gb-sdl <rom.gb> [--scale N] [--fullscreen] [--swap-ab] [--frames N]\n\
+const USAGE: &str =
+    "usage: gb-sdl <rom.gb> [--scale N] [--fullscreen] [--swap-ab] [--frames N] [--record FILE]\n\
   --scale N      initial window scale (default 4)\n\
   --fullscreen   start fullscreen (F11 toggles)\n\
   --swap-ab      swap the gamepad face buttons (default: east = B, south = A)\n\
-  --frames N     run N frames (paced) then quit, for smoke testing";
+  --frames N     run N frames (paced) then quit, for smoke testing\n\
+  --record FILE  write your button presses, by frame, to FILE (replay with gb-cli --input).\n\
+                 Starts from a fresh boot and neither reads nor writes the .sav file.";
 
 struct Args {
     rom: PathBuf,
@@ -31,6 +34,7 @@ struct Args {
     fullscreen: bool,
     swap_ab: bool,
     frames: Option<u64>,
+    record: Option<PathBuf>,
 }
 
 fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -41,6 +45,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         fullscreen: false,
         swap_ab: false,
         frames: None,
+        record: None,
     };
     let mut it = args;
     while let Some(a) = it.next() {
@@ -56,6 +61,9 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--frames" => {
                 let v = it.next().ok_or("--frames needs a number")?;
                 out.frames = Some(v.parse().map_err(|_| "--frames must be a number")?);
+            }
+            "--record" => {
+                out.record = Some(PathBuf::from(it.next().ok_or("--record needs a file")?));
             }
             "--fullscreen" => out.fullscreen = true,
             "--swap-ab" => out.swap_ab = true,
@@ -99,7 +107,17 @@ fn run(args: Args) -> Result<(), String> {
         .map_err(|e| format!("cannot load {}: {e}", args.rom.display()))?;
     eprintln!("loaded {}", cart.header().title);
     let mut gb = GameBoy::new(cart, Model::Dmg);
-    let mut save = save::SaveFile::open(&args.rom, &mut gb);
+    // Recording needs a fresh boot (see SaveFile::disabled), so it skips saves altogether.
+    let mut save = if args.record.is_some() {
+        eprintln!("recording: save file ignored for this session");
+        save::SaveFile::disabled(&args.rom)
+    } else {
+        save::SaveFile::open(&args.rom, &mut gb)
+    };
+    let mut recording = match &args.record {
+        Some(path) => Some(RecordingFile::create(path, &gb.cartridge().header().title)?),
+        None => None,
+    };
 
     let sdl = sdl2::init()?;
     let video = sdl.video()?;
@@ -203,6 +221,9 @@ fn run(args: Args) -> Result<(), String> {
         }
 
         gb.set_buttons(input.buttons());
+        if let Some(rec) = recording.as_mut() {
+            rec.frame(frame_count, input.buttons().0);
+        }
         gb.run_frame();
 
         for (dst, px) in pixels
@@ -232,7 +253,91 @@ fn run(args: Args) -> Result<(), String> {
         pacer.wait_for_next_frame(fast_forward);
     }
 
+    if let Some(rec) = recording.as_mut() {
+        rec.finish(frame_count);
+    }
     // Quit event also covers SIGINT/SIGTERM: SDL turns them into SDL_QUIT by default.
     save.flush(&mut gb, true);
     Ok(())
+}
+
+/// Writes the input script while you play. Each line is flushed at once, so a crash or kill
+/// loses at most the last change.
+struct RecordingFile {
+    out: std::io::BufWriter<std::fs::File>,
+    recorder: gb_core::input_script::Recorder,
+    path: PathBuf,
+}
+
+impl RecordingFile {
+    fn create(path: &std::path::Path, title: &str) -> Result<RecordingFile, String> {
+        use std::io::Write;
+        let file = std::fs::File::create(path)
+            .map_err(|e| format!("cannot create {}: {e}", path.display()))?;
+        let mut out = std::io::BufWriter::new(file);
+        writeln!(out, "# gb-sdl recording of {title}, from a fresh boot")
+            .and_then(|()| out.flush())
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        Ok(RecordingFile {
+            out,
+            recorder: Default::default(),
+            path: path.to_path_buf(),
+        })
+    }
+
+    fn write_line(&mut self, line: &str) {
+        use std::io::Write;
+        if let Err(e) = writeln!(self.out, "{line}").and_then(|()| self.out.flush()) {
+            eprintln!("error: writing {}: {e}", self.path.display());
+        }
+    }
+
+    /// Call before each frame runs with the buttons held for it.
+    fn frame(&mut self, frame: u64, mask: u8) {
+        if let Some(line) = self.recorder.frame(frame, mask) {
+            self.write_line(&line);
+        }
+    }
+
+    fn finish(&mut self, frames: u64) {
+        self.write_line(&gb_core::input_script::Recorder::finish(frames));
+        eprintln!(
+            "recording saved to {} ({frames} frames)",
+            self.path.display()
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_option_is_parsed() {
+        let args = parse_args(
+            ["x.gb", "--record", "run.txt"]
+                .map(String::from)
+                .into_iter(),
+        );
+        assert_eq!(args.unwrap().record, Some(PathBuf::from("run.txt")));
+        assert!(parse_args(["x.gb", "--record"].map(String::from).into_iter()).is_err());
+    }
+
+    #[test]
+    fn recording_file_writes_changes_and_end() {
+        let path = std::env::temp_dir().join("gb-sdl-record-test.txt");
+        let mut rec = RecordingFile::create(&path, "TEST").unwrap();
+        rec.frame(0, 0);
+        rec.frame(5, gb_core::Buttons::A);
+        rec.frame(6, gb_core::Buttons::A);
+        rec.frame(9, 0);
+        rec.finish(20);
+        let text = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        let script = gb_core::input_script::InputScript::parse(&text).unwrap();
+        assert_eq!(script.buttons_at(5), gb_core::Buttons(gb_core::Buttons::A));
+        assert_eq!(script.buttons_at(9), gb_core::Buttons(0));
+        assert_eq!(script.end(), Some(20));
+        assert_eq!(text.lines().filter(|l| !l.starts_with('#')).count(), 2);
+    }
 }

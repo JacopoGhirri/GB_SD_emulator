@@ -54,6 +54,19 @@ pub struct SaveFile {
 }
 
 impl SaveFile {
+    /// A save file that never reads or writes anything. Used while recording an input script:
+    /// the recording must start from a fresh boot so that a headless replay (which loads no
+    /// save) reproduces it exactly, and a recording session must not overwrite a real save.
+    pub fn disabled(rom: &Path) -> SaveFile {
+        SaveFile {
+            path: save_path(rom),
+            enabled: false,
+            has_rtc: false,
+            last_written: Vec::new(),
+            last_flush: Instant::now(),
+        }
+    }
+
     /// Load an existing save (if any) into `gb`. Problems are reported on stderr and never
     /// abort: a corrupt save is moved to `<rom>.sav.bad` instead of being overwritten.
     pub fn open(rom: &Path, gb: &mut GameBoy) -> SaveFile {
