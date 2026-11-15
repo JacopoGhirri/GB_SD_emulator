@@ -2,6 +2,7 @@
 //! All file and terminal I/O lives here; `gb-core` never touches the filesystem.
 
 mod image;
+mod wav;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -102,6 +103,11 @@ struct RunArgs {
     /// Directory for --screenshot-at PNGs, named frame-<N>.png.
     #[arg(long, value_name = "DIR")]
     screenshot_dir: Option<PathBuf>,
+
+    /// Write the audio produced during the run to a 16-bit stereo 48 kHz WAV file and print its
+    /// peak/RMS level.
+    #[arg(long, value_name = "FILE")]
+    wav: Option<PathBuf>,
 
     /// Write a Gameboy Doctor trace, one line per instruction (needs --max-instructions).
     /// Also makes LY read 0x90 and IF read without its unused bits, as Doctor expects.
@@ -219,6 +225,7 @@ fn run(args: &RunArgs) -> u8 {
         gb.set_doctor_mode(true);
     }
     let mut serial = Vec::new();
+    let mut audio: Vec<f32> = Vec::new();
     let mut instructions: u64 = 0;
 
     if let Some(frames) = frames {
@@ -228,6 +235,9 @@ fn run(args: &RunArgs) -> u8 {
             }
             gb.run_frame();
             serial.extend(gb.take_serial());
+            if args.wav.is_some() {
+                gb.drain_audio(&mut audio);
+            }
             let done = frame + 1;
             if args.hash_at.contains(&done) {
                 println!("frame {done}: hash {:016x}", gb.framebuffer_hash());
@@ -255,6 +265,9 @@ fn run(args: &RunArgs) -> u8 {
             gb.step();
             instructions += 1;
             serial.extend(gb.take_serial());
+            if args.wav.is_some() && instructions.is_multiple_of(1024) {
+                gb.drain_audio(&mut audio);
+            }
         }
     }
 
@@ -262,6 +275,22 @@ fn run(args: &RunArgs) -> u8 {
         if let Err(e) = out.flush() {
             eprintln!("error: writing trace: {e}");
             return EXIT_FAILED;
+        }
+    }
+
+    if let Some(path) = &args.wav {
+        gb.drain_audio(&mut audio);
+        let (peak, rms) = wav::level(&audio);
+        match std::fs::write(path, wav::encode(&audio, 48_000)) {
+            Ok(()) => println!(
+                "wav written to {}: {:.2} s, peak {peak:.3}, rms {rms:.4}",
+                path.display(),
+                audio.len() as f32 / 2.0 / 48_000.0
+            ),
+            Err(e) => {
+                eprintln!("error: writing {}: {e}", path.display());
+                return EXIT_FAILED;
+            }
         }
     }
 
