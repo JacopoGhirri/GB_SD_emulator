@@ -235,4 +235,51 @@ mod tests {
             "a frame is 70224 T-cycles, got {frame} (instruction granularity allows a few)"
         );
     }
+
+    /// CGB ROM: arm KEY1, STOP (speed switch), then spin.
+    fn speed_switch_rom() -> Cartridge {
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x143] = 0x80;
+        // LD A,1 ; LDH (0x4D),A ; STOP ; JR -2
+        rom[0x100..0x108].copy_from_slice(&[0x3E, 0x01, 0xE0, 0x4D, 0x10, 0x00, 0x18, 0xFE]);
+        Cartridge::from_bytes(rom).unwrap()
+    }
+
+    #[test]
+    fn stop_with_key1_armed_switches_to_double_speed_and_the_ppu_stays_real_time() {
+        let mut gb = GameBoy::new(speed_switch_rom(), Model::Cgb);
+        assert_eq!(gb.bus().peek(0xFF4D), 0x7E);
+        for _ in 0..4 {
+            gb.step(); // LD, LDH, STOP (the STOP step includes the 2050 M-cycle pause)
+        }
+        assert!(gb.bus().double_speed());
+        assert_eq!(gb.bus().peek(0xFF4D), 0xFE, "bit 7 set, arm bit cleared");
+        gb.run_frame();
+        let start = gb.bus().cycles();
+        gb.run_frame();
+        let frame = gb.bus().cycles() - start;
+        // 70224 PPU dots now take 140448 CPU T-cycles.
+        assert!(frame.abs_diff(140448) < 48, "got {frame}");
+    }
+
+    #[test]
+    fn stop_without_arming_or_on_dmg_does_not_switch_speed() {
+        for model in [Model::Dmg, Model::Cgb] {
+            let mut rom = vec![0u8; 0x8000];
+            rom[0x143] = 0x80;
+            rom[0x100..0x104].copy_from_slice(&[0x10, 0x00, 0x18, 0xFE]); // STOP ; JR -2
+            let mut gb = GameBoy::new(Cartridge::from_bytes(rom).unwrap(), model);
+            for _ in 0..3 {
+                gb.step();
+            }
+            assert!(!gb.bus().double_speed());
+        }
+        // KEY1 does not exist on DMG hardware: arming it is ignored.
+        let mut gb = GameBoy::new(speed_switch_rom(), Model::Dmg);
+        for _ in 0..4 {
+            gb.step();
+        }
+        assert!(!gb.bus().double_speed());
+        assert_eq!(gb.bus().peek(0xFF4D), 0xFF);
+    }
 }

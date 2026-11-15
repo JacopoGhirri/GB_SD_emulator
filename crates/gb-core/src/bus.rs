@@ -40,6 +40,9 @@ const WRAM_SIZE: usize = 0x8000;
 const WRAM_BANK_SIZE: usize = 0x1000;
 /// SVBK: WRAM bank select, CGB mode only (Pan Docs "WRAM Bank Select").
 const REG_SVBK: u16 = 0xFF70;
+/// KEY1: speed switch arm bit (bit 0) and current speed (bit 7), CGB mode only.
+const REG_KEY1: u16 = 0xFF4D;
+const SPEED_SWITCH_M_CYCLES: u32 = 2050;
 const HRAM_START: u16 = 0xFF80;
 const HRAM_END: u16 = 0xFFFE;
 
@@ -72,6 +75,14 @@ pub struct Bus {
     /// True when running in CGB mode: CGB hardware *and* a cartridge that supports CGB.
     /// CGB hardware with a DMG-only cartridge is "DMG compatibility mode" (this stays false).
     cgb_mode: bool,
+    /// CGB double-speed mode (KEY1 bit 7). The CPU, timer, serial port and OAM DMA run at twice
+    /// the normal rate; the PPU, APU and the cartridge's real-time clock keep their real-time
+    /// rate (Pan Docs "Speed Switch"). So in double speed they advance every *second* M-cycle.
+    double_speed: bool,
+    /// KEY1 bit 0: a speed switch is armed and the next STOP performs it.
+    key1_armed: bool,
+    /// Toggles every M-cycle in double speed; the PPU/APU/RTC advance when it is true.
+    slow_phase: bool,
 }
 
 impl Bus {
@@ -87,6 +98,9 @@ impl Bus {
         ppu.set_cgb(cgb_mode);
         Bus {
             cgb_mode,
+            double_speed: false,
+            key1_armed: false,
+            slow_phase: false,
             cartridge,
             ppu,
             apu: Apu::new(),
@@ -108,6 +122,31 @@ impl Bus {
         &self.cartridge
     }
 
+    /// True while the CPU runs at double speed (CGB only).
+    pub fn double_speed(&self) -> bool {
+        self.double_speed
+    }
+
+    /// Whether KEY1 bit 0 armed a speed switch that the next STOP will perform.
+    pub fn speed_switch_armed(&self) -> bool {
+        self.key1_armed
+    }
+
+    /// Perform an armed speed switch (called by STOP). Toggles the speed, clears the arm bit and
+    /// leaves the CPU stopped for 2050 M-cycles while the other components keep running
+    /// (Pan Docs "Speed Switch": the switch takes about 2050 M-cycles).
+    pub fn switch_speed(&mut self) {
+        self.double_speed = !self.double_speed;
+        self.key1_armed = false;
+        self.slow_phase = false;
+        // The frame sequencer watches a different counter bit in double speed.
+        self.apu
+            .set_double_speed(self.double_speed, self.timer.counter());
+        for _ in 0..SPEED_SWITCH_M_CYCLES {
+            self.idle();
+        }
+    }
+
     /// Whether CGB features are active (CGB hardware running a CGB-capable cartridge).
     pub fn cgb_mode(&self) -> bool {
         self.cgb_mode
@@ -124,21 +163,34 @@ impl Bus {
 
     /// Advance the whole system by one M-cycle (4 T-cycles).
     pub fn tick(&mut self) {
+        // `cycles` counts CPU T-cycles, so a frame is 140448 of them in double speed.
         self.cycles += u64::from(T_CYCLES_PER_M_CYCLE);
+        // The PPU, APU and RTC run on the unchanged real-time clock: every M-cycle normally,
+        // every second one in double speed.
+        let slow_tick = if self.double_speed {
+            self.slow_phase = !self.slow_phase;
+            self.slow_phase
+        } else {
+            true
+        };
         if self.timer.tick() {
             self.request_interrupt(Interrupt::Timer);
         }
-        self.apu.tick(self.timer.counter());
-        self.cartridge.tick();
+        if slow_tick {
+            self.apu.tick(self.timer.counter());
+            self.cartridge.tick();
+        }
         if self.serial.tick() {
             self.request_interrupt(Interrupt::Serial);
         }
-        let irq = self.ppu.tick();
-        if irq.vblank {
-            self.request_interrupt(Interrupt::VBlank);
-        }
-        if irq.stat {
-            self.request_interrupt(Interrupt::LcdStat);
+        if slow_tick {
+            let irq = self.ppu.tick();
+            if irq.vblank {
+                self.request_interrupt(Interrupt::VBlank);
+            }
+            if irq.stat {
+                self.request_interrupt(Interrupt::LcdStat);
+            }
         }
         if let Some((src, dst)) = self.dma.tick() {
             // The DMA reads the source directly, bypassing the CPU bus restriction.
@@ -258,6 +310,9 @@ impl Bus {
             }
             REG_LY if self.doctor_mode => DOCTOR_LY,
             REG_DMA => self.io[(addr - IO_START) as usize] | io::read_mask(addr),
+            REG_KEY1 if self.cgb_mode => {
+                0x7E | (u8::from(self.double_speed) << 7) | u8::from(self.key1_armed)
+            }
             ppu::REG_VBK => self.ppu.read_vbk(),
             ppu::REG_BCPS..=ppu::REG_OCPD => self.ppu.read_palette_reg(addr),
             REG_SVBK if self.cgb_mode => 0xF8 | self.svbk,
@@ -287,6 +342,7 @@ impl Bus {
                 self.io[(addr - IO_START) as usize] = value;
                 self.dma.start(value);
             }
+            REG_KEY1 if self.cgb_mode => self.key1_armed = value & 1 != 0,
             ppu::REG_VBK => self.ppu.write_vbk(value),
             ppu::REG_BCPS..=ppu::REG_OCPD => self.ppu.write_palette_reg(addr, value),
             REG_SVBK if self.cgb_mode => self.svbk = value & 7,

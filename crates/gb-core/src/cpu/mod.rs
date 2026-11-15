@@ -338,9 +338,13 @@ impl Cpu {
                     bus.write(addr.wrapping_add(1), (self.regs.sp >> 8) as u8);
                 }
                 2 => {
-                    // STOP is followed by a padding byte. Phase 1 treats it as a 2-byte NOP;
-                    // the low-power mode is not needed by the CPU tests.
+                    // STOP is followed by a padding byte. Apart from the CGB speed switch it
+                    // is treated as a 2-byte NOP (the low-power mode is not modelled).
                     self.fetch(bus);
+                    if bus.speed_switch_armed() {
+                        // CGB: STOP with KEY1 bit 0 set switches between normal and double speed.
+                        bus.switch_speed();
+                    }
                 }
                 3 => self.jr(bus, true),
                 _ => {

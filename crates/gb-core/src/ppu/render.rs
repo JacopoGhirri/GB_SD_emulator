@@ -43,13 +43,17 @@ const CGB_ATTR_Y_FLIP: u8 = 0x40;
 const CGB_ATTR_BG_PRIORITY: u8 = 0x80;
 
 /// Colour `idx` (0..=3) of palette `pal` (0..=7) in a 64-byte CGB palette RAM, as 0x00RRGGBB.
-/// Entries are little-endian RGB555: `0bBBBBBGGGGGRRRRR`. Scaling is x*255/31 *rounded* to nearest:
-/// the cgb-acid2 reference image needs 13 -> 107 and 21 -> 173, which truncation misses by one.
+/// Entries are little-endian RGB555: `0bBBBBBGGGGGRRRRR`. Each 5-bit channel becomes 8 bits as
+/// `(c << 3) | (c >> 2)` (bit replication), the formula the AGE test suite documents for its reference screenshots. It matches cgb-acid2's
+/// reference too (13 -> 107, 21 -> 173), where plain truncating `c*255/31` is off by one.
 /// No colour correction (out of scope for phase 7).
 pub(super) fn cgb_colour(ram: &[u8; 64], pal: u8, idx: u8) -> u32 {
     let i = usize::from(pal) * 8 + usize::from(idx) * 2;
     let v = u16::from_le_bytes([ram[i], ram[i + 1]]);
-    let scale = |c: u16| (u32::from(c & 0x1F) * 255 + 15) / 31;
+    let scale = |c: u16| {
+        let c = u32::from(c & 0x1F);
+        (c << 3) | (c >> 2)
+    };
     (scale(v) << 16) | (scale(v >> 5) << 8) | scale(v >> 10)
 }
 
@@ -664,7 +668,7 @@ mod tests {
     }
 
     #[test]
-    fn rgb555_conversion_is_little_endian_rgb_and_rounds() {
+    fn rgb555_conversion_is_little_endian_rgb_with_bit_replication() {
         let mut ram = [0u8; 64];
         ram[2] = 0x1F; // colour 1 of palette 0: 0x001F = pure red
         assert_eq!(cgb_colour(&ram, 0, 1), 0xFF0000);
@@ -674,11 +678,16 @@ mod tests {
         ram[6] = 0x00;
         ram[7] = 0x7C; // 0x7C00 = pure blue
         assert_eq!(cgb_colour(&ram, 0, 3), 0x0000FF);
-        // 13 -> 107 and 21 -> 173 are the values the cgb-acid2 reference image uses.
+        // 13 -> 107 and 21 -> 173 are the values the cgb-acid2 reference image uses;
+        // 3 -> 24 and 24 -> 198 tell bit replication from rounding.
         ram[8] = 13;
         ram[16] = 21;
         assert_eq!(cgb_colour(&ram, 1, 0) & 0xFF0000, 107 << 16);
         assert_eq!(cgb_colour(&ram, 2, 0) & 0xFF0000, 173 << 16);
+        ram[24] = 3;
+        ram[32] = 24;
+        assert_eq!(cgb_colour(&ram, 3, 0) & 0xFF0000, 24 << 16);
+        assert_eq!(cgb_colour(&ram, 4, 0) & 0xFF0000, 198 << 16);
     }
 
     #[test]

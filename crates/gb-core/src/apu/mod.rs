@@ -53,6 +53,8 @@ pub struct Apu {
     /// Bit 12 of the timer's system counter (bit 4 of DIV) at the last tick; the frame sequencer
     /// advances on its falling edge, 512 times a second.
     last_div_bit: bool,
+    /// CGB double speed: the frame sequencer watches counter bit 13 instead of 12.
+    double_speed: bool,
 
     // Mixer and sample output.
     sample_rate: u32,
@@ -91,6 +93,7 @@ impl Apu {
             ch4: Noise::new(),
             fs_step: 0,
             last_div_bit: false,
+            double_speed: false,
             sample_rate: DEFAULT_SAMPLE_RATE,
             muted: 0,
             sample_phase: 0,
@@ -216,11 +219,28 @@ impl Apu {
     /// Feed the system counter to the frame sequencer. Also called right after a DIV write,
     /// because resetting the counter can itself produce a falling edge.
     pub fn clock_div(&mut self, div_counter: u16) {
-        let bit = div_counter & 0x1000 != 0;
+        let bit = div_counter & self.div_mask() != 0;
         if self.last_div_bit && !bit && self.powered {
             self.frame_step();
         }
         self.last_div_bit = bit;
+    }
+
+    /// Counter bit the frame sequencer watches: bit 12 normally, bit 13 in CGB double speed
+    /// (the counter runs twice as fast, the sequencer stays at 512 Hz of real time).
+    fn div_mask(&self) -> u16 {
+        if self.double_speed {
+            0x2000
+        } else {
+            0x1000
+        }
+    }
+
+    /// Called by the bus on a CGB speed switch. Re-samples the watched bit without stepping the
+    /// sequencer, so the switch itself cannot cause a spurious frame-sequencer clock.
+    pub fn set_double_speed(&mut self, on: bool, div_counter: u16) {
+        self.double_speed = on;
+        self.last_div_bit = div_counter & self.div_mask() != 0;
     }
 
     fn frame_step(&mut self) {
