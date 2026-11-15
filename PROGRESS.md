@@ -1,6 +1,6 @@
 # PROGRESS
 
-**Current phase:** 4 — Frontend, input, saves (phase 3 gate fully met, owner reviewed screenshots 2026-11-14)
+**Current phase:** 5 — Pokémon Red/Blue (phase 4 gate met; owner chose to proceed 2026-11-15 with left stick and View/Select still untested)
 **Last updated:** 2026-11-15
 
 ## Status by phase
@@ -8,8 +8,8 @@
 - [x] 1 CPU  (gate met 2026-11-13, see "Phase 1 — CPU: gate status")
 - [x] 2 Bus, timer, cartridge  (gate met 2026-11-14, see "Phase 2" below)
 - [x] 3 PPU  (gate met 2026-11-14, owner visual review done, see "Phase 3" below)
-- [~] 4 Frontend, input, saves  (automated work done; most human gate items confirmed, a few open, see "Phase 4" below)
-- [ ] 5 Pokémon Red/Blue
+- [x] 4 Frontend, input, saves  (gate met; minor untested items: left stick, View/Select, see "Phase 4" below)
+- [~] 5 Pokémon Red/Blue  (in progress; Yellow dropped by owner decision 2026-11-15: owner has no Yellow ROM and won't use it)
 - [ ] 6 APU
 - [ ] 7 CGB
 - [ ] 8 Polish / accuracy

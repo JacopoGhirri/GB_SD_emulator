@@ -1,7 +1,7 @@
-# Phase 5 — Pokémon Red / Blue / Yellow compatibility
+# Phase 5 — Pokémon Red / Blue compatibility
 
 ## Goal
-Pokémon Red, Blue and Yellow boot, play correctly for an extended session, and save/load reliably.
+Pokémon Red and Blue boot, play correctly for an extended session, and save/load reliably.
 This is a **compatibility and debugging** phase: most code already exists; the work is finding and fixing
 what real games need beyond test ROMs. No per-game hacks (see `CLAUDE.md` §7).
 
@@ -12,8 +12,8 @@ If no ROM is present, do only the preparation tasks (1–2) and ask the human.
 
 ## Facts to confirm from the header (do not hardcode)
 - Red/Blue: cartridge type 0x13 (MBC3 + RAM + BATTERY), 1 MiB ROM, 32 KiB RAM.
-- Yellow: cartridge type 0x1B (MBC5 + RAM + BATTERY), 1 MiB ROM, 32 KiB RAM.
-- Neither uses the RTC. All three run on the DMG; Yellow also has CGB-enhanced colour (needs phase 7 for colour, plays fine in DMG mode).
+- Neither uses the RTC. Both run on the DMG.
+- (Yellow, MBC5, was dropped from scope by the owner on 2026-11-15: no ROM available.)
 
 ## Tasks
 1. **Local-only ROM test harness**: `cargo test` tests that look for `roms/*.gb`, and **skip if absent**.
@@ -42,7 +42,7 @@ If no ROM is present, do only the preparation tasks (1–2) and ask the human.
    (crashes, desyncs, save problems).
 
 ## Gate (definition of done)
-- [ ] Human confirms Red (or Blue) plays from new game through the first gym with no visible glitches, and Yellow boots and plays similarly.
+- [ ] Human confirms Red (or Blue) plays from new game through the first gym with no visible glitches. (Yellow dropped by owner decision, 2026-11-15.)
 - [ ] Save → quit → relaunch → Continue verified by the human on desktop **and** Steam Deck.
 - [ ] No panics, no hangs over a long scripted soak run.
 - [ ] Every bug fixed has a note in `PROGRESS.md` (symptom → cause → fix → regression test if any).
