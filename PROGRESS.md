@@ -1,6 +1,6 @@
 # PROGRESS
 
-**Current phase:** 5 done (Pokémon Red/Blue gate met with owner waivers, see "Phase 5 gate"); phase 6 APU is next
+**Current phase:** 6 APU: automated work done, waiting on owner listening tests (see "Phase 6")
 **Last updated:** 2026-11-15
 
 ## Status by phase
@@ -10,7 +10,7 @@
 - [x] 3 PPU  (gate met 2026-11-14, owner visual review done, see "Phase 3" below)
 - [x] 4 Frontend, input, saves  (gate met; minor untested items: left stick, View/Select, see "Phase 4" below)
 - [x] 5 Pokémon Red/Blue  (gate met with owner waivers: first gym not reached, Blue not separately tested; Yellow dropped by owner decision 2026-11-15: owner has no Yellow ROM and won't use it)
-- [ ] 6 APU
+- [~] 6 APU  (code + automated gate items done; owner listening/Deck items open, see "Phase 6")
 - [ ] 7 CGB
 - [ ] 8 Polish / accuracy
 
@@ -399,3 +399,52 @@ Total recorded play replayed in tests: ~36 min emulated, no panic or hang.
 - [x] No panics/hangs over a long scripted soak (replays of 48,789 and 80,740 frames).
 - [x] Bugs fixed: none were found, so nothing to log.
 - [x] No per-game special cases (grep, see above).
+
+## Phase 6 — APU: status (2026-11-15)
+Environment as before (WSL Ubuntu, rustc 1.100.0). **Automated gate items are done; the human items are open.**
+
+- [~] Blargg `dmg_sound` individual ROMs: **11 of 12 pass**. `10-wave trigger while on` fails (documented below, listed in `KNOWN_FAILING` in `tests/dmg_sound.rs`, which fails if it ever starts passing).
+- [ ] WAV dumps look/sound right: peak/RMS and pitch are checked by tests; **owner must listen** to `C:/Users/jacop/Desktop/red_title_2400frames.wav` (40 s of Pokémon Red from boot: intro and title music; made with `gb-cli run roms/pokemon_red.gb --frames 2400 --wav ...`).
+- [ ] Owner confirms Pokémon audio on desktop and Steam Deck (title theme, battle music, no crackle). Not done.
+- [~] Pacing is audio-driven; the headless soak below shows a stable queue over 10 minutes. Real-device drift not verified.
+
+```
+$ cargo test -p gb-core --test dmg_sound -- --nocapture
+01-registers: PASS   02-len ctr: PASS   03-trigger: PASS   04-sweep: PASS   05-sweep details: PASS
+06-overflow on trigger: PASS   07-len sweep period sync: PASS   08-len ctr during power: PASS
+09-wave read while on: PASS   10-wave trigger while on: FAIL (known)   11-regs after power: PASS
+12-wave write while on: PASS          test result: ok. 1 passed; 0 failed
+
+$ cargo test --workspace   (WSL, ROMs present)  -> every "test result" line ok, 0 failed:
+gb-cli 9 + 3 (acid2) + 1 (wav); gb-core unit 135; audio_determinism 1 ("290122 samples identical");
+blargg_timing 3; cpu_instrs 12; determinism 2; dmg_sound 1; doctor_trace 11; harness_smoke 2; mooneye 7;
+pokemon_local 2 ("pokemon_red: 4 hashes match after 48789 frames", "pokemon_red.run2: 6 hashes match after 80740 frames");
+save_roundtrip 5; gb-sdl 20.   clippy --all-targets -D warnings: clean;  cargo fmt --check: fmt-ok
+
+$ SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy gb-sdl roms/pokemon_blue.gb --frames 35836 --record /tmp/x   (10 min of emulated time)
+audio: 35835 frames paced, queue fill min/avg/max 1889/2144/2400 stereo frames (target 2400), 0 underruns, 0 overflows
+real 9m31.247s
+(60 s run: min/avg/max 1889/2144/2400, 0 underruns, real 57.5 s for 60.27 s nominal)
+```
+Wall time is 4.8 % *shorter* than nominal in both runs, with identical queue statistics: a constant offset, not drift. My explanation (not verified) is that SDL's dummy audio driver ticks slightly fast; a real device is the owner's check.
+
+### Phase 6 decisions
+- **Layout:** `apu/mod.rs` (registers, power, frame sequencer, mixer, sampling), `common.rs` (length counter, envelope), `square.rs` (with sweep), `wave.rs`, `noise.rs`. The bus ticks the APU once per M-cycle and passes the timer's 16-bit counter (`Timer::counter()`); the frame sequencer steps on the falling edge of counter bit 12, also right after a DIV write.
+- **Stepping:** channels advance per T-cycle (4 steps per M-cycle).
+- **Mixing:** DAC-on channels map digital 0..15 to -1..1 (DAC off = 0), summed with NR51 panning and NR50 volume, divided by 8 (6 dB headroom: a first version with /4 peaked at 1.2 and would clip), then a high-pass filter (0.999958 per T-cycle). Each output sample is the average of the mix over its T-cycles (box filter). 48 kHz default via `set_sample_rate`; the internal buffer is capped at 1 s if never drained.
+- **DMG only:** length counters survive power-off and are writable while off; wave RAM access while the channel plays follows the DMG rule (only at the fetch cycle).
+- **Frontend pacing:** SDL audio queue (f32, 48 kHz stereo, 50 ms target). After each frame the loop sleeps until the queue drains to the target, so the sound card's clock sets the speed; there is no separate rate-adjust factor, the game simply follows the card. A queue over 250 ms is dropped; waits are capped at 100 ms. Tab (fast-forward) discards audio. No device or `--no-audio` falls back to the timer `Pacer`.
+- **Keys:** 1-4 mute channels, +/- volume (default 100 %). **No new dependencies** (the WAV header is written by hand).
+- **Process note:** commit `a0d9fa9` went in with a clippy error in a new test (fixed in the next commit); the later commit `189c5a1` has a misleading message: it only contains the Steam Deck doc note, PROGRESS.md follows in the next commit.
+
+### Phase 6 known issues
+- **dmg_sound 10 (wave retrigger corruption) fails.** Tunables: `TRIGGER_DELAY_T` and `ACCESS_WINDOW_T` in `wave.rs`. A first-sample delay of 5 or 6 passes 09 and 12 but not 10; a delay of 4 passes 10 but breaks 09 and 12. Varying the corruption window and a separate retrigger delay never fixed it. I stopped after a focused grid search; hypothesis: real hardware timing is finer than my 4-T bus granularity, so one delay cannot satisfy both groups. Games should not depend on this.
+- Not implemented (obscure): envelope "zombie mode", exact first-sample delays for squares/noise, CGB sound differences (phase 7/8).
+- `gb-cli --wav` assumes 48 kHz (the core default).
+- Test suite time grew: `pokemon_local` now takes ~175-195 s (was ~65 s) because the APU runs every T-cycle.
+
+### Phase 6: what I need from the owner
+1. Listen to `C:/Users/jacop/Desktop/red_title_2400frames.wav` (I put it there; delete it when done). Does the title theme sound right (pitch, tempo, no harshness)?
+2. Run `gb-sdl roms/pokemon_red.gb` on desktop (WSLg): is the music right in the intro/title and in a battle, any crackle? Try keys 1-4 and +/-. Quit normally and send me the printed `audio:` line.
+3. Same on the Steam Deck (Game Mode: the line lands in `~/gb_log.txt`).
+4. Decide whether you want more effort on dmg_sound 10 (I recommend not).
