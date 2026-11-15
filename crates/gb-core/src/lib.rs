@@ -51,7 +51,7 @@ impl GameBoy {
         let cgb_mode = model == Model::Cgb && cartridge.header().supports_cgb();
         GameBoy {
             model,
-            cpu: Cpu::new(),
+            cpu: Cpu::post_boot(model, cgb_mode),
             bus: Bus::with_mode(cartridge, cgb_mode),
         }
     }

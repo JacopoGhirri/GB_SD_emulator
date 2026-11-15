@@ -37,8 +37,21 @@ pub struct Cpu {
 impl Cpu {
     /// CPU in the DMG post-boot state (no boot ROM is emulated).
     pub fn new() -> Cpu {
+        Cpu::with_registers(Registers::post_boot_dmg())
+    }
+
+    /// CPU in the post-boot state of the given hardware (see `GameBoy::new`).
+    pub fn post_boot(model: crate::Model, cgb_mode: bool) -> Cpu {
+        Cpu::with_registers(match (model, cgb_mode) {
+            (crate::Model::Dmg, _) => Registers::post_boot_dmg(),
+            (crate::Model::Cgb, true) => Registers::post_boot_cgb(),
+            (crate::Model::Cgb, false) => Registers::post_boot_cgb_compat(),
+        })
+    }
+
+    fn with_registers(regs: Registers) -> Cpu {
         Cpu {
-            regs: Registers::post_boot_dmg(),
+            regs,
             ime: false,
             ime_pending: false,
             halted: false,
