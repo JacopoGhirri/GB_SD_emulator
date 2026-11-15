@@ -74,6 +74,6 @@ Read `/home/deck/gb_log.txt` (it is overwritten at every launch). Errors such as
 appear there, because the script redirects stdout and stderr to it.
 
 ## 8. Still unconfirmed on the Deck
-- D-pad, stick, Menu/Start and View/Select individually (A and B are confirmed: Deck A = GB A, Deck B = GB B).
+- D-pad, stick and View/Select individually (confirmed: Deck A = GB A, Deck B = GB B, Menu (three lines) = Start).
 - `--fullscreen` in Game Mode (the working setup does not use it).
 - Cause of the original instant close (section 4).
