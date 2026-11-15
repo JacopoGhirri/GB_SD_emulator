@@ -17,8 +17,8 @@ at runtime, and the `sdl2` crate's `bundled` feature can build it if needed).
 4. **Keyboard**: arrows = D-pad, Z = B, X = A, Enter = Start, Backspace/RShift = Select, Esc = quit,
    F11 = fullscreen, Tab (hold) = fast-forward (uncapped). Make the mapping a table at the top of the file.
 5. **Gamepad** via SDL `GameController` API (maps Steam Deck controls and most pads automatically):
-   D-pad and left stick → D-pad, **Deck B (east) → GB B and Deck A (south) → GB A** (physical-position
-   matches Nintendo layout; make this swappable), Start/Select, **Guide/Steam button combos left to Steam**.
+   D-pad and left stick → D-pad, **Deck B (east) → GB B and Deck A (south) → GB A** (matches by
+   *label*, not by the Nintendo physical layout; `--swap-ab` gives the physical layout), Start/Select, **Guide/Steam button combos left to Steam**.
    Hot-plug support.
 6. **Save files**: battery RAM (+RTC for MBC3) written to `<rom>.sav` beside the ROM
    (or an XDG data dir; pick one and document it). Load on start if present. Flush on exit, on

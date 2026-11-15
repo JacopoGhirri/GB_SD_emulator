@@ -1,48 +1,80 @@
 # Running gb-sdl on the Steam Deck
 
-> **UNVERIFIED DRAFT.** Written from the phase 4 plan before anyone ran it on a Deck. The owner
-> must try these steps and this file must then be corrected to exactly what worked
-> (phase 4 gate). Items marked (?) are guesses.
+Status legend: **[confirmed]** = the owner did it and reported it worked. **[unconfirmed]** = not
+checked by anyone yet. This file records the setup that worked for the owner (2026-11-15); it is
+not a general guide to every Deck configuration.
 
-## 1. Build in Desktop Mode
-SteamOS keeps the root filesystem read-only; nothing below changes it.
+## 1. Build in WSL and copy the binary  [confirmed]
+Nothing is built on the Deck, so SteamOS needs no changes (no unlocking the root filesystem, no Rust).
 
-1. Switch to Desktop Mode (Steam button, Power, Switch to Desktop).
-2. Open Konsole and install Rust into your home directory:
-   `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh` (accept the defaults).
-   Then `source ~/.cargo/env`.
-3. SDL2 is already present on SteamOS at runtime. Building needs the SDL2 *development*
-   files and a C toolchain (?). If `cargo build` fails to find SDL2 or a linker, report the
-   exact error; do not unlock the root filesystem without deciding to.
-4. Get the source (clone or copy this repository to e.g. `~/gb`), then:
-   `cd ~/gb && cargo build -p gb-sdl --release`
-   The binary is `target/release/gb-sdl`.
+1. In WSL Ubuntu (needs `libsdl2-dev`): `cargo build -p gb-sdl --release`
+   (the binary lands in the cargo target dir, e.g. `~/gb-target/release/gb-sdl`).
+2. Copy the binary to the Deck. SteamOS already ships `libSDL2` at runtime.
 
-Alternative: build on another Linux x86_64 machine and copy the `gb-sdl` binary (it needs
-`libSDL2` at runtime).
+## 2. Folder layout on the Deck  [confirmed]
+```
+/home/deck/Desktop/gb_emu/
+    gb-sdl            the binary (chmod +x gb-sdl)
+    run.sh            wrapper script, see section 4 (chmod +x run.sh)
+    Pokemon_Red.gb    your own dumped ROM
+```
+Copy the ROM too: the first attempt failed with `cannot read ROM: No such file` only because the ROM
+had not been copied yet.
 
-## 2. Put a ROM somewhere
-Use a ROM you dumped yourself, or a free homebrew/test ROM. The battery save is written next to
-the ROM as `<rom>.sav` (for `pokemon.gb`, `pokemon.gb.sav`), so keep ROMs in a writable folder
-such as `~/roms/`.
+## 3. Try it in Desktop Mode first  [confirmed]
+From Konsole, in that folder: `./gb-sdl Pokemon_Red.gb`
 
-## 3. Try it in Desktop Mode first
-`~/gb/target/release/gb-sdl ~/roms/game.gb --scale 5`
-- D-pad / left stick = D-pad, east button (B) = Game Boy B, south button (A) = Game Boy A.
-  Add `--swap-ab` to exchange them.
-- Menu (Start) = Start, View (Select/Back) = Select. The Steam button is left to Steam.
-- Keyboard: arrows, Z = B, X = A, Enter = Start, Backspace/RShift = Select, Tab (hold) =
-  fast-forward, F11 = fullscreen, Esc = quit.
+- Keyboard: arrows, Z = B, X = A, Enter = Start, Backspace/RShift = Select, Tab (hold) = fast-forward,
+  F11 = fullscreen, Esc = quit.
+- Gamepad: D-pad and left stick = D-pad, Menu = Start, View = Select. The Steam button is left to Steam.
+- **A/B mapping is by label (default):** Deck **A** = Game Boy **A**, Deck **B** = Game Boy **B**.
+  That is not the Nintendo *physical* layout: on a Game Boy, A is the right-hand button and B the
+  left-hand one, whereas on the Deck A is the lower button and B the right-hand one. Pass `--swap-ab`
+  to get the Nintendo physical layout (Deck B/east = GB A, Deck A/south = GB B).
 
-## 4. Add to Steam (Game Mode)
-1. In Steam (Desktop Mode): Games, Add a Non-Steam Game to My Library, Browse, pick `gb-sdl`.
-2. Open its Properties. Set Launch Options to
-   `%command% /home/deck/roms/game.gb --fullscreen`
-   (one non-Steam shortcut per game, or a wrapper script (?)).
-3. Controller settings: use the "Gamepad" template (not keyboard/mouse), so Steam passes the
-   buttons through as a controller.
-4. Switch back to Game Mode and launch it from the library.
+## 4. Game Mode: use a wrapper script  [confirmed: works]
+Launching `gb-sdl` directly as the Steam target closed instantly in Game Mode. A wrapper script fixed it.
+`/home/deck/Desktop/gb_emu/run.sh`:
+```bash
+#!/bin/bash
+cd /home/deck/Desktop/gb_emu
+./gb-sdl Pokemon_Red.gb > /home/deck/gb_log.txt 2>&1
+```
+Why it helps: **the exact cause of the instant close is unconfirmed.** Suspects are the working
+directory (Steam may not start the program in its own folder, so a relative ROM path fails), the
+relative ROM path itself, or `--fullscreen` under Game Mode. The script fixes the first two by
+changing directory first, and it captures any error text in a log. The working setup does **not** use
+`--fullscreen`.
 
-## 5. What to report back
-Record in `PROGRESS.md`: did it start, is the speed right, do the buttons feel right, does a
-save survive quitting from Game Mode (Steam button, Exit game), and anything that failed.
+## 5. Steam settings (Desktop Mode, then switch to Game Mode)
+1. Games, Add a Non-Steam Game to My Library, Browse, pick `run.sh` (choose "All Files" in the picker).  [confirmed]
+2. Properties:  [confirmed]
+   - **Target:** `run.sh` (full path `/home/deck/Desktop/gb_emu/run.sh`)
+   - **Start In:** `/home/deck/Desktop/gb_emu/`
+   - **Launch Options:** empty
+3. Controller layout: choose **"Gamepad With Joystick Trackpad"** (Steam Input on, default settings).  [confirmed]
+   **Avoid the "Team Fortress 2" layout** that the picker may offer: it maps to keyboard and mouse,
+   not to a gamepad.
+4. Launch from the library in Game Mode.  [confirmed: owner reports it "works perfectly"]
+
+One shortcut plays one ROM (the ROM name is inside `run.sh`). For another game, copy the script and
+shortcut, or edit the ROM name.
+
+## 6. Saves  [save path confirmed in WSL; Deck round trip unconfirmed]
+The battery save is written beside the ROM as `<rom>.sav`, so here
+`/home/deck/Desktop/gb_emu/Pokemon_Red.gb.sav`. The script's `cd` is what puts it there, since the ROM
+path is relative. Saves are flushed on quit, window close, focus loss and every 30 s if changed.
+Quit from Game Mode with Steam button, Exit game (or Esc with a keyboard).
+
+- Save, quit, relaunch, Continue works in WSL (WSLg window).  [confirmed]
+- The same round trip on the Deck in Game Mode.  [unconfirmed]
+
+## 7. When something goes wrong
+Read `/home/deck/gb_log.txt` (it is overwritten at every launch). Errors such as `cannot read ROM ...`
+appear there, because the script redirects stdout and stderr to it.
+
+## 8. Still unconfirmed on the Deck
+- Save and Continue round trip in Game Mode.
+- Each Deck button individually (D-pad, stick, A, B, Menu/Start, View/Select).
+- `--fullscreen` in Game Mode (the working setup does not use it).
+- Cause of the original instant close (section 4).

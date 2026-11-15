@@ -42,8 +42,9 @@ pub fn key_bit(key: Keycode) -> u8 {
         .map_or(0, |(_, b)| *b)
 }
 
-/// Face buttons. Default (phase 4 spec): east -> GB B, south -> GB A, so the buttons sit where
-/// the Game Boy's own do. `swap_ab` exchanges them. Guide is never mapped (left to Steam).
+/// Face buttons. Default: match by label (east = Deck B -> GB B, south = Deck A -> GB A). That is
+/// NOT the Nintendo physical layout (GB A is the right-hand button); `swap_ab` gives that layout.
+/// Guide is never mapped (left to Steam).
 pub fn face_bit(button: Button, swap_ab: bool) -> u8 {
     let (east, south) = if swap_ab {
         (Buttons::A, Buttons::B)
