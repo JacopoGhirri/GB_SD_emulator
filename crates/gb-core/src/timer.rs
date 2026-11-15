@@ -27,6 +27,11 @@ const TAC_UNUSED_BITS: u8 = 0xF8;
 /// The low byte is the phase of the boot sequence's last instructions and matters to Mooneye's
 /// timer tests. 0xABCC is the value other accurate emulators use; the tests decide if it is right.
 const POST_BOOT_COUNTER: u16 = 0xABCC;
+/// CGB (revisions B-E) equivalent, found by sweeping the start value against Mooneye
+/// `misc/boot_div-cgbABCDE`: 0x2678 is the only one in 0x2500..=0x27FC (step 4) that passes.
+/// `boot_div-cgb0` is for the first CGB silicon, which has different power-up timing; like
+/// `dmg0` it is treated as other hardware and is not expected to pass.
+const POST_BOOT_COUNTER_CGB: u16 = 0x2678;
 
 #[derive(Debug, Clone)]
 pub struct Timer {
@@ -41,6 +46,15 @@ pub struct Timer {
 }
 
 impl Timer {
+    /// Timer in the post-boot state of CGB hardware, whose boot ROM runs a different number of
+    /// cycles than the DMG's.
+    pub fn new_cgb() -> Timer {
+        Timer {
+            counter: POST_BOOT_COUNTER_CGB,
+            ..Timer::new()
+        }
+    }
+
     pub fn new() -> Timer {
         Timer {
             counter: POST_BOOT_COUNTER,

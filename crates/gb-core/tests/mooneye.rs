@@ -75,3 +75,24 @@ fn acceptance_ppu_recorded() {
         "PPU ROMs that used to pass now fail: {regressed:?}"
     );
 }
+
+/// CGB boot-state ROMs (phase 7, task 2/7). They are DMG-flagged, so they run in DMG compatibility
+/// mode on `Model::Cgb`. `boot_div-cgb0` targets the first CGB silicon (different power-up timing)
+/// and is deliberately not run, like `dmg0`.
+#[test]
+fn misc_cgb_boot_state() {
+    for name in ["boot_regs-cgb", "boot_div-cgbABCDE", "boot_hwio-C"] {
+        let rom = format!("{MOONEYE}/misc/{name}.gb");
+        let Some((verdict, n)) = common::run_mooneye_rom_on(&rom, gb_core::Model::Cgb, BUDGET)
+        else {
+            println!("SKIP: {rom} not found. Run scripts/fetch_test_roms.sh.");
+            return;
+        };
+        println!("{rom}: {verdict:?} after {n} instructions");
+        assert_eq!(
+            verdict,
+            gb_core::mooneye::MooneyeVerdict::Pass,
+            "{rom} on CGB"
+        );
+    }
+}

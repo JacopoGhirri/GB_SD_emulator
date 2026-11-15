@@ -53,6 +53,8 @@ pub const SHADES: [u32; 4] = [0x00FF_FFFF, 0x00AA_AAAA, 0x0055_5555, 0x0000_0000
 pub struct PpuIrq {
     pub vblank: bool,
     pub stat: bool,
+    /// The PPU just entered mode 0 on a visible line (HBlank DMA moves a block now).
+    pub hblank: bool,
 }
 
 /// VBK (0xFF4F): VRAM bank select, CGB mode only (Pan Docs "VRAM Banks"). Bit 0 selects the
@@ -72,8 +74,10 @@ pub struct Ppu {
     vram1: [u8; VRAM_SIZE],
     /// Bank the CPU sees at 0x8000..=0x9FFF (VBK bit 0). The renderer picks banks per tile.
     vbk: u8,
-    /// CGB mode: VBK works. In DMG mode VBK reads 0xFF and writes are ignored.
+    /// CGB mode: the CGB renderer (attributes, RGB555 palettes) is used.
     cgb: bool,
+    /// CGB hardware: VBK and the palette registers exist, also in DMG compatibility mode.
+    cgb_hw: bool,
     /// CGB palette RAM: 8 palettes x 4 colours x 2 bytes (RGB555, little-endian), BG and OBJ.
     bg_pal: [u8; 64],
     obj_pal: [u8; 64],
@@ -124,12 +128,15 @@ impl Ppu {
             vram1: [0; VRAM_SIZE],
             vbk: 0,
             cgb: false,
+            cgb_hw: false,
             // The CGB boot ROM leaves white in the BG palettes; OBJ palette RAM is undefined
             // after boot, white is a safe choice.
             bg_pal: [0xFF, 0x7F].repeat(32).try_into().expect("64 bytes"),
             obj_pal: [0xFF, 0x7F].repeat(32).try_into().expect("64 bytes"),
-            bcps: 0,
-            ocps: 0,
+            // Post-boot index registers read 0xC8 / 0xD0 (auto-increment, index 8 / 16): the boot
+            // ROM left them there after writing palette data (Mooneye `misc/boot_hwio-C`).
+            bcps: 0x88,
+            ocps: 0x90,
             oam: [0; OAM_SIZE],
             lcdc: 0x91,
             stat_enable: 0,
@@ -157,11 +164,17 @@ impl Ppu {
     /// Switch on CGB behaviour (called once by the bus when the console is built).
     pub fn set_cgb(&mut self, cgb: bool) {
         self.cgb = cgb;
+        self.cgb_hw |= cgb;
+    }
+
+    /// CGB hardware, possibly running a DMG-only cartridge (renderer stays DMG-style).
+    pub fn set_cgb_hardware(&mut self, hw: bool) {
+        self.cgb_hw = hw;
     }
 
     /// Read VBK (0xFF4F). Unused bits read 1; the register does not exist on DMG.
     pub fn read_vbk(&self) -> u8 {
-        if self.cgb {
+        if self.cgb_hw {
             0xFE | self.vbk
         } else {
             0xFF
@@ -169,7 +182,7 @@ impl Ppu {
     }
 
     pub fn write_vbk(&mut self, value: u8) {
-        if self.cgb {
+        if self.cgb_hw {
             self.vbk = value & 1;
         }
     }
@@ -177,7 +190,7 @@ impl Ppu {
     /// Read BCPS/BCPD/OCPS/OCPD. Palette data is unreadable (0xFF) during mode 3 (Pan Docs
     /// "Accessing palette RAM"). Does not exist on DMG (0xFF).
     pub fn read_palette_reg(&self, addr: u16) -> u8 {
-        if !self.cgb {
+        if !self.cgb_hw {
             return 0xFF;
         }
         match addr {
@@ -192,7 +205,7 @@ impl Ppu {
     /// Write BCPS/BCPD/OCPS/OCPD. A data write during mode 3 is lost, but the index still
     /// auto-increments (Pan Docs).
     pub fn write_palette_reg(&mut self, addr: u16, value: u8) {
-        if !self.cgb {
+        if !self.cgb_hw {
             return;
         }
         let blocked = self.mode() == MODE_DRAWING;
@@ -311,6 +324,7 @@ impl Ppu {
         self.dot += 4;
         if self.dot == OAM_SCAN_DOTS + DRAW_DOTS && self.ly < FIRST_VBLANK_LINE {
             self.render_line();
+            irq.hblank = true;
         }
         if self.dot >= DOTS_PER_LINE {
             self.dot -= DOTS_PER_LINE;

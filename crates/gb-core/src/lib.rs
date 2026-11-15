@@ -7,6 +7,7 @@ pub mod bus;
 pub mod cartridge;
 pub mod cpu;
 pub mod dma;
+pub mod hdma;
 pub mod input_script;
 pub mod interrupts;
 pub mod io;
@@ -52,7 +53,7 @@ impl GameBoy {
         GameBoy {
             model,
             cpu: Cpu::post_boot(model, cgb_mode),
-            bus: Bus::with_mode(cartridge, cgb_mode),
+            bus: Bus::with_mode(cartridge, model == Model::Cgb, cgb_mode),
         }
     }
 

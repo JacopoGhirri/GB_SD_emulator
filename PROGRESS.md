@@ -472,10 +472,25 @@ $ cargo test --workspace -> every "test result" ok, 0 failed (gb-cli acid2 5 pas
 ```
   Finding: the first attempt with truncating `x*255/31` differed in 368 pixels (only 13 -> 106 vs 107 and 21 -> 172 vs 173); the reference needs **rounded** scaling `(x*255+15)/31`, now used (the phase file said "simple x*255/31"; the test decided). **Superseded in task 5:** the AGE suite documents `(c << 3) | (c >> 2)` (bit replication) for its reference screenshots; it equals the rounded formula on 13 and 21, so cgb-acid2 accepts both, but they differ at 3, 7, 24, 28. Bit replication is now used (re-checked: cgb-acid2 still matches). 6 new renderer unit tests.
 - [x] Task 5: double speed. KEY1 (FF4D) arm bit; STOP with the arm bit set toggles speed and pauses the CPU 2050 M-cycles; in double speed the PPU, APU and MBC3 RTC advance every second M-cycle (CPU, timer, serial, OAM DMA stay per M-cycle); APU frame sequencer watches counter bit 13 instead of 12; KEY1 does not exist on DMG / DMG-compat. `Bus::cycles()` counts CPU T-cycles, so a frame is 140448 in double speed. 2 new unit tests (frame length 140448 +- 48 after the switch; STOP unarmed / on DMG does nothing).
+- [x] Task 6: VRAM DMA (`hdma.rs`, `Bus::hdma_copy_block`): GDMA copies immediately and stalls the CPU 8 M-cycles per block (16 in double speed); HBlank DMA moves one block when the PPU reaches mode 0 on lines 0-143 (new `PpuIrq::hblank`), starts immediately if already in HBlank, cancellable, FF55 reads back per Pan Docs. 8 new unit tests (hdma.rs 4, bus 4+).
+- [x] Task 7: FF56/FF6C/FF72-FF77 with documented defaults and masks (see the hardware-vs-mode note above); CGB post-boot P1, DIV counter, BCPS/OCPS. New test `misc_cgb_boot_state` in `tests/mooneye.rs`.
+```
+$ cargo test --workspace   (WSL, after task 7)  -> every "test result" ok, 0 failed:
+gb-cli 9 + acid2 5; gb-core unit 159; audio_determinism 1; blargg_timing 3; cpu_instrs 12; determinism 2; dmg_sound 1;
+doctor_trace 11 (56.9 s); harness_smoke 2; mooneye 8; pokemon_local 2 (196 s, all hashes unchanged); save_roundtrip 5; gb-sdl 20
+clippy --all-targets -D warnings: clean;  cargo fmt: applied
+```
 
 ### Phase 7 open follow-ups (record and revisit)
-- **Mooneye CGB boot ROMs fail** (`misc/boot_regs-cgb`, `boot_div-cgb0`, `boot_div-cgbABCDE`, `boot_hwio-C`): all print `mooneye: FAIL after ~93-95k instructions, B..L = 42`. Cause not yet known (the register values did not change the failing instruction count of `boot_regs-cgb`, 94358). **Re-run after task 7 and record the exact failing check here**, so it is a defined phase-8 follow-up if still failing.
+- ~~Mooneye CGB boot ROMs fail~~ **Resolved after task 7 (re-run as requested).** My earlier note was wrong about the cause: these ROMs are DMG-flagged, so `gb-cli` without `--model cgb` ran them as a DMG (the header-based default picks DMG for them) and the "FAIL" was just the DMG register values on screen. With `--model cgb`:
+```
+$ cargo test -p gb-core --test mooneye misc_cgb -- --nocapture
+mooneye-test-suite/misc/boot_regs-cgb.gb: Pass after 94232 instructions
+mooneye-test-suite/misc/boot_div-cgbABCDE.gb: Pass after 94380 instructions
+mooneye-test-suite/misc/boot_hwio-C.gb: Pass after 92961 instructions
+test result: ok. 1 passed
+```
+  `boot_div-cgb0` (first CGB silicon, different power-up timing) fails and is deliberately not run, like `dmg0`: **still failing, other hardware**. What had to change: CGB post-boot DIV counter 0x2678 (found by sweeping 0x2500..0x27FC step 4 against `boot_div-cgbABCDE`; only that value passes), P1 reads 0xFF on CGB hardware, BCPS/OCPS read 0xC8/0xD0. **Hardware vs mode:** in DMG compatibility mode on CGB hardware (what these ROMs are), VBK (FE), BCPS/OCPS, FF72/FF73 exist, but KEY1, SVBK, RP, FF74-FF77 read 0xFF and OPRI reads 0xFF (the boot ROM sets bit 0). The bus gates registers accordingly (`cgb_hw` vs `cgb_mode`), taken from what `boot_hwio-C` expects.
 - **DMG-compat register values come from one ROM's expected table** (`boot_regs-cgb`: AF=1180 BC=0000 DE=0008 HL=007C, `Registers::post_boot_cgb_compat`). The real CGB boot ROM derives B/DE/HL from a hash of the title, so other DMG-only titles may expect different values. Not modelled.
-- Full `cargo test --workspace` must be re-run at the end of task 3 (commit 2 only re-ran gb-core unit tests).
 - **AGE `speed-switch/spsw-*` ROMs fail** (6 ROMs; Fibonacci pass signature, `gb-cli --model cgb --mooneye`): all end with B..L = 00 6B 14 06 98 10, e.g. `spsw-div-cgbBCE.gb` ("TEST FAILED!" table of values on screen) after 55374 instructions. Not investigated: they check exact DIV/TIMA/mode-0/STOP-prefetch timing across the switch. Tried resetting DIV on the switch: no ROM changed, reverted. Unknown details: whether DIV is reset, the exact length of the pause, what the switch does to the PPU phase. Phase-8 accuracy follow-up.
 - Phase 8 note: AGE documents non-CGB-mode (DMG-compat on CGB) palette colours: BG `#000000 #0063C6 #7BFF31 #FFFFFF`, OBJ `#000000 #943939 #FF8484 #FFFFFF` (task 1 currently uses plain grey for DMG-compat cartridges, the DMG renderer).

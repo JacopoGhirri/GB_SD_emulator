@@ -7,6 +7,7 @@
 use crate::apu::Apu;
 use crate::cartridge::Cartridge;
 use crate::dma::Dma;
+use crate::hdma::{self, Hdma};
 use crate::interrupts::{Interrupt, Interrupts};
 use crate::io::{self, IO_LEN, IO_START};
 pub use crate::io::{REG_DMA, REG_LY, REG_P1};
@@ -43,6 +44,21 @@ const REG_SVBK: u16 = 0xFF70;
 /// KEY1: speed switch arm bit (bit 0) and current speed (bit 7), CGB mode only.
 const REG_KEY1: u16 = 0xFF4D;
 const SPEED_SWITCH_M_CYCLES: u32 = 2050;
+// Other CGB-only registers (Pan Docs "Registers" CGB list). They are kept as plain storage with
+// the documented unused bits reading 1; nothing here changes emulation yet.
+/// RP: infrared port. Bit 0 write data, bits 6-7 read enable. Bit 1 (receive) reads 1 = "no light",
+/// as there is no infrared hardware to talk to.
+const REG_RP: u16 = 0xFF56;
+/// OPRI: bit 0 = 1 selects DMG-style sprite priority. Stored only: the CGB renderer always uses
+/// OAM-index priority (what CGB-mode games and cgb-acid2 expect, OPRI = 0).
+const REG_OPRI: u16 = 0xFF6C;
+/// Undocumented but present on CGB: FF72/FF73 8 bits, FF74 8 bits (CGB mode), FF75 bits 4-6.
+const REG_UNDOC_72: u16 = 0xFF72;
+const REG_UNDOC_74: u16 = 0xFF74;
+const REG_UNDOC_75: u16 = 0xFF75;
+/// PCM12/PCM34: live digital audio outputs. Not modelled; read 0.
+const REG_PCM12: u16 = 0xFF76;
+const REG_PCM34: u16 = 0xFF77;
 const HRAM_START: u16 = 0xFF80;
 const HRAM_END: u16 = 0xFFFE;
 
@@ -75,6 +91,10 @@ pub struct Bus {
     /// True when running in CGB mode: CGB hardware *and* a cartridge that supports CGB.
     /// CGB hardware with a DMG-only cartridge is "DMG compatibility mode" (this stays false).
     cgb_mode: bool,
+    /// CGB hardware (whether or not the cartridge uses CGB features). The CGB-only registers
+    /// exist, with their post-boot values, even in DMG compatibility mode (Mooneye
+    /// `misc/boot_hwio-C` runs a DMG-flagged ROM and reads them).
+    cgb_hw: bool,
     /// CGB double-speed mode (KEY1 bit 7). The CPU, timer, serial port and OAM DMA run at twice
     /// the normal rate; the PPU, APU and the cartridge's real-time clock keep their real-time
     /// rate (Pan Docs "Speed Switch"). So in double speed they advance every *second* M-cycle.
@@ -83,36 +103,58 @@ pub struct Bus {
     key1_armed: bool,
     /// Toggles every M-cycle in double speed; the PPU/APU/RTC advance when it is true.
     slow_phase: bool,
+    /// VRAM DMA (GDMA / HBlank DMA), CGB mode only.
+    hdma: Hdma,
+    /// M-cycles the CPU is still stalled by a VRAM DMA block; the system keeps running.
+    hdma_stall: u32,
 }
 
 impl Bus {
     /// A DMG bus. See [`Bus::with_mode`].
     pub fn new(cartridge: Cartridge) -> Bus {
-        Bus::with_mode(cartridge, false)
+        Bus::with_mode(cartridge, false, false)
     }
 
-    /// `cgb_mode` must already combine the hardware model with the cartridge header
-    /// (see `GameBoy::new`).
-    pub fn with_mode(cartridge: Cartridge, cgb_mode: bool) -> Bus {
+    /// `cgb_hardware`: the console is a CGB (it differs from a DMG after boot even when running
+    /// a DMG-only cartridge). `cgb_mode` must already combine the hardware model with the
+    /// cartridge header (see `GameBoy::new`) and implies `cgb_hardware`.
+    pub fn with_mode(cartridge: Cartridge, cgb_hardware: bool, cgb_mode: bool) -> Bus {
+        let mut io: [u8; IO_LEN] = std::array::from_fn(|i| io::power_up_value(IO_START + i as u16));
+        if cgb_hardware && !cgb_mode {
+            // The CGB boot ROM sets OPRI bit 0 (DMG-style sprite priority) for DMG-only carts.
+            io[usize::from(REG_OPRI - IO_START)] = 1;
+        }
         let mut ppu = Ppu::new();
         ppu.set_cgb(cgb_mode);
+        ppu.set_cgb_hardware(cgb_hardware);
         Bus {
             cgb_mode,
+            cgb_hw: cgb_hardware,
             double_speed: false,
             key1_armed: false,
             slow_phase: false,
+            hdma: Hdma::new(),
+            hdma_stall: 0,
             cartridge,
             ppu,
             apu: Apu::new(),
             wram: [0; WRAM_SIZE],
             svbk: 0,
             hram: [0; 0x7F],
-            io: std::array::from_fn(|i| io::power_up_value(IO_START + i as u16)),
+            io,
             interrupts: Interrupts::new(),
             cycles: 0,
-            timer: Timer::new(),
+            timer: if cgb_hardware {
+                Timer::new_cgb()
+            } else {
+                Timer::new()
+            },
             dma: Dma::new(),
-            joypad: Joypad::new(),
+            joypad: if cgb_hardware {
+                Joypad::post_boot_cgb()
+            } else {
+                Joypad::new()
+            },
             serial: Serial::new(),
             doctor_mode: false,
         }
@@ -163,6 +205,15 @@ impl Bus {
 
     /// Advance the whole system by one M-cycle (4 T-cycles).
     pub fn tick(&mut self) {
+        self.tick_one();
+        // A VRAM DMA block stalls the CPU: time passes, but the CPU's next access waits.
+        while self.hdma_stall > 0 {
+            self.hdma_stall -= 1;
+            self.tick_one();
+        }
+    }
+
+    fn tick_one(&mut self) {
         // `cycles` counts CPU T-cycles, so a frame is 140448 of them in double speed.
         self.cycles += u64::from(T_CYCLES_PER_M_CYCLE);
         // The PPU, APU and RTC run on the unchanged real-time clock: every M-cycle normally,
@@ -191,12 +242,31 @@ impl Bus {
             if irq.stat {
                 self.request_interrupt(Interrupt::LcdStat);
             }
+            if irq.hblank && self.hdma.hblank_active() {
+                self.hdma_copy_block();
+            }
         }
         if let Some((src, dst)) = self.dma.tick() {
             // The DMA reads the source directly, bypassing the CPU bus restriction.
             let value = self.peek(src);
             self.ppu.write_oam(dst as usize, value);
         }
+    }
+
+    /// Copy one 16-byte VRAM DMA block into the current VRAM bank and stall the CPU for it:
+    /// 8 M-cycles per block, 16 in double speed (the DMA engine runs in real time, Pan Docs).
+    fn hdma_copy_block(&mut self) {
+        let (src, dst) = self.hdma.next_block();
+        for i in 0..hdma::BLOCK_BYTES {
+            let from = src.wrapping_add(i);
+            // Valid sources are ROM and external/work RAM; anything else is not modelled.
+            let value = match from {
+                0..=ROM_END | EXT_RAM_START..=WRAM_END => self.peek(from),
+                _ => 0xFF,
+            };
+            self.ppu.write_vram(usize::from((dst + i) & 0x1FFF), value);
+        }
+        self.hdma_stall += if self.double_speed { 16 } else { 8 };
     }
 
     /// An M-cycle in which the CPU does no memory access (internal delay).
@@ -296,6 +366,14 @@ impl Bus {
         }
     }
 
+    fn io_reg(&self, addr: u16) -> u8 {
+        self.io[(addr - IO_START) as usize]
+    }
+
+    fn set_io_reg(&mut self, addr: u16, value: u8) {
+        self.io[(addr - IO_START) as usize] = value;
+    }
+
     fn read_io(&self, addr: u16) -> u8 {
         match addr {
             // The upper three bits of IF are unused and read as 1.
@@ -310,6 +388,13 @@ impl Bus {
             }
             REG_LY if self.doctor_mode => DOCTOR_LY,
             REG_DMA => self.io[(addr - IO_START) as usize] | io::read_mask(addr),
+            hdma::REG_HDMA1..=hdma::REG_HDMA5 if self.cgb_hw => self.hdma.read(addr),
+            REG_RP if self.cgb_mode => 0x3E | (self.io_reg(addr) & 0xC1),
+            REG_OPRI if self.cgb_hw => 0xFE | (self.io_reg(addr) & 1),
+            REG_UNDOC_72..=0xFF73 if self.cgb_hw => self.io_reg(addr),
+            REG_UNDOC_74 if self.cgb_mode => self.io_reg(addr),
+            REG_UNDOC_75 if self.cgb_hw => 0x8F | (self.io_reg(addr) & 0x70),
+            REG_PCM12 | REG_PCM34 if self.cgb_hw => 0x00,
             REG_KEY1 if self.cgb_mode => {
                 0x7E | (u8::from(self.double_speed) << 7) | u8::from(self.key1_armed)
             }
@@ -342,6 +427,31 @@ impl Bus {
                 self.io[(addr - IO_START) as usize] = value;
                 self.dma.start(value);
             }
+            hdma::REG_HDMA1..=hdma::REG_HDMA5 if self.cgb_hw => {
+                match self.hdma.write(addr, value) {
+                    hdma::Start::Nothing => {}
+                    hdma::Start::General(blocks) => {
+                        for _ in 0..blocks {
+                            self.hdma_copy_block();
+                        }
+                    }
+                    hdma::Start::HBlank => {
+                        // Started during HBlank: this HBlank's block goes right away.
+                        if self.ppu.lcd_on()
+                            && self.ppu.mode() == ppu::MODE_HBLANK
+                            && self.ppu.ly() < 144
+                        {
+                            self.hdma_copy_block();
+                        }
+                    }
+                }
+            }
+            REG_RP if self.cgb_mode => self.set_io_reg(addr, value & 0xC1),
+            REG_OPRI if self.cgb_hw => self.set_io_reg(addr, value & 1),
+            REG_UNDOC_72..=0xFF73 if self.cgb_hw => self.set_io_reg(addr, value),
+            REG_UNDOC_74 if self.cgb_mode => self.set_io_reg(addr, value),
+            REG_UNDOC_75 if self.cgb_hw => self.set_io_reg(addr, value & 0x70),
+            REG_PCM12 | REG_PCM34 => {}
             REG_KEY1 if self.cgb_mode => self.key1_armed = value & 1 != 0,
             ppu::REG_VBK => self.ppu.write_vbk(value),
             ppu::REG_BCPS..=ppu::REG_OCPD => self.ppu.write_palette_reg(addr, value),
@@ -463,7 +573,7 @@ mod tests {
     fn cgb_bus() -> Bus {
         let mut rom = vec![0u8; 0x8000];
         rom[0x143] = 0x80;
-        Bus::with_mode(Cartridge::from_bytes(rom).unwrap(), true)
+        Bus::with_mode(Cartridge::from_bytes(rom).unwrap(), true, true)
     }
 
     #[test]
@@ -516,6 +626,128 @@ mod tests {
         assert_eq!(bus.peek(ppu::REG_VBK), 0xFF);
         bus.write(0x8000, 0x77);
         assert_eq!(bus.ppu().vram()[0], 0x77, "VBK ignored: still bank 0");
+    }
+
+    /// Program HDMA1-4 to copy from `src` to VRAM offset `dst`.
+    fn set_hdma_addresses(bus: &mut Bus, src: u16, dst: u16) {
+        bus.write(hdma::REG_HDMA1, (src >> 8) as u8);
+        bus.write(hdma::REG_HDMA2, src as u8);
+        bus.write(hdma::REG_HDMA3, (dst >> 8) as u8);
+        bus.write(hdma::REG_HDMA4, dst as u8);
+    }
+
+    #[test]
+    fn general_dma_copies_blocks_and_stalls_the_cpu() {
+        let mut bus = cgb_bus();
+        for i in 0..32u16 {
+            bus.write(0xC000 + i, 0x40 + i as u8);
+        }
+        set_hdma_addresses(&mut bus, 0xC000, 0x8100);
+        let before = bus.cycles();
+        bus.write(hdma::REG_HDMA5, 0x01); // 2 blocks = 32 bytes
+        for i in 0..32usize {
+            assert_eq!(bus.ppu().vram()[0x100 + i], 0x40 + i as u8, "byte {i}");
+        }
+        // The write itself is 1 M-cycle, then 8 M-cycles per block in normal speed.
+        assert_eq!(bus.cycles() - before, 4 * (1 + 16));
+        assert_eq!(bus.peek(hdma::REG_HDMA5), 0xFF);
+    }
+
+    #[test]
+    fn general_dma_writes_into_the_selected_vram_bank() {
+        let mut bus = cgb_bus();
+        bus.write(0xC000, 0x99);
+        set_hdma_addresses(&mut bus, 0xC000, 0x8000);
+        bus.write(ppu::REG_VBK, 1);
+        bus.write(hdma::REG_HDMA5, 0x00);
+        assert_eq!(bus.ppu().vram_bank1()[0], 0x99);
+        assert_eq!(bus.ppu().vram()[0], 0);
+    }
+
+    #[test]
+    fn hblank_dma_moves_one_block_per_hblank_and_stops_after_the_last() {
+        let mut bus = cgb_bus();
+        for i in 0..48u16 {
+            bus.write(0xC000 + i, 1 + i as u8);
+        }
+        set_hdma_addresses(&mut bus, 0xC000, 0x8000);
+        // Wait for the start of a frame's visible area with the LCD on (default LCDC 0x91).
+        while bus.ppu().ly() != 0 || bus.ppu().mode() != ppu::MODE_OAM_SCAN {
+            bus.tick();
+        }
+        bus.write(hdma::REG_HDMA5, 0x82); // 3 blocks, HBlank mode
+        assert_eq!(bus.peek(hdma::REG_HDMA5), 0x02, "active, 3 blocks left");
+        assert_eq!(
+            bus.ppu().vram()[0],
+            0,
+            "nothing copied before the first HBlank"
+        );
+        let mut seen = Vec::new();
+        for _ in 0..(456 * 4 / 4) {
+            bus.tick();
+            let n = (0..48).filter(|&i| bus.ppu().vram()[i] != 0).count();
+            if seen.last() != Some(&n) {
+                seen.push(n);
+            }
+        }
+        // Lines 0, 1 and 2 each had an HBlank in these 456 M-cycles (4 lines): 16, 32, 48 bytes.
+        assert_eq!(seen, vec![0, 16, 32, 48]);
+        assert_eq!(bus.peek(hdma::REG_HDMA5), 0xFF, "finished");
+        assert_eq!(bus.ppu().vram()[47], 48);
+    }
+
+    #[test]
+    fn hblank_dma_can_be_cancelled() {
+        let mut bus = cgb_bus();
+        set_hdma_addresses(&mut bus, 0xC000, 0x8000);
+        bus.write(hdma::REG_HDMA5, 0x8F);
+        bus.write(hdma::REG_HDMA5, 0x0F); // bit 7 clear: cancel
+        assert_eq!(bus.peek(hdma::REG_HDMA5), 0x8F);
+        for _ in 0..(456 * 3) {
+            bus.tick();
+        }
+        assert_eq!(
+            bus.peek(hdma::REG_HDMA5),
+            0x8F,
+            "no blocks moved after cancel"
+        );
+    }
+
+    #[test]
+    fn dmg_has_no_vram_dma_registers() {
+        let mut bus = test_bus();
+        bus.write(hdma::REG_HDMA5, 0x00);
+        assert_eq!(bus.peek(hdma::REG_HDMA5), 0xFF);
+    }
+
+    #[test]
+    fn cgb_misc_registers_have_documented_defaults_and_masks() {
+        let mut bus = cgb_bus();
+        assert_eq!(bus.peek(REG_RP), 0x3E);
+        bus.write(REG_RP, 0xFF);
+        assert_eq!(bus.peek(REG_RP), 0xFF, "bits 0, 6, 7 stored, bit 1 reads 1");
+        bus.write(REG_RP, 0x00);
+        assert_eq!(bus.peek(REG_RP), 0x3E);
+        assert_eq!(bus.peek(REG_OPRI), 0xFE);
+        bus.write(REG_OPRI, 0xFF);
+        assert_eq!(bus.peek(REG_OPRI), 0xFF);
+        bus.write(REG_UNDOC_72, 0x5A);
+        assert_eq!(bus.peek(REG_UNDOC_72), 0x5A);
+        bus.write(REG_UNDOC_75, 0xFF);
+        assert_eq!(bus.peek(REG_UNDOC_75), 0xFF);
+        bus.write(REG_UNDOC_75, 0x00);
+        assert_eq!(bus.peek(REG_UNDOC_75), 0x8F);
+        assert_eq!(bus.peek(REG_PCM12), 0x00);
+    }
+
+    #[test]
+    fn dmg_does_not_have_the_cgb_misc_registers() {
+        let mut bus = test_bus();
+        bus.write(REG_RP, 0x00);
+        bus.write(REG_UNDOC_72, 0x5A);
+        for addr in [REG_RP, REG_OPRI, REG_UNDOC_72, REG_UNDOC_75, REG_PCM12] {
+            assert_eq!(bus.peek(addr), 0xFF, "{addr:#06X}");
+        }
     }
 
     #[test]

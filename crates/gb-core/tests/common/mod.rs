@@ -117,11 +117,21 @@ pub fn run_mooneye_rom(
     relative: &str,
     max_instructions: u64,
 ) -> Option<(gb_core::mooneye::MooneyeVerdict, u64)> {
+    run_mooneye_rom_on(relative, Model::Dmg, max_instructions)
+}
+
+/// Like [`run_mooneye_rom`] on the given hardware. Mooneye's CGB ROMs are DMG-flagged, so they
+/// need `Model::Cgb` explicitly (they then run in DMG compatibility mode on CGB hardware).
+pub fn run_mooneye_rom_on(
+    relative: &str,
+    model: Model,
+    max_instructions: u64,
+) -> Option<(gb_core::mooneye::MooneyeVerdict, u64)> {
     let path = rom_path(relative);
     let bytes = fs::read(&path).ok()?;
     let cart = Cartridge::from_bytes(bytes)
         .unwrap_or_else(|e| panic!("{} is not a valid ROM: {e}", path.display()));
-    let mut gb = GameBoy::new(cart, Model::Dmg);
+    let mut gb = GameBoy::new(cart, model);
     Some(gb_core::mooneye::run_mooneye(&mut gb, max_instructions))
 }
 

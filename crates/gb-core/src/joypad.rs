@@ -39,6 +39,15 @@ impl Joypad {
         Joypad::default()
     }
 
+    /// Post-boot state of CGB hardware: no group selected, so P1 reads 0xFF (the DMG boot ROM
+    /// leaves 0xCF). Checked by Mooneye `misc/boot_hwio-C`.
+    pub fn post_boot_cgb() -> Joypad {
+        Joypad {
+            select: SELECT_MASK,
+            ..Joypad::default()
+        }
+    }
+
     /// Low nibble of P1 for the current selection; 0 = pressed.
     fn nibble(&self) -> u8 {
         let b = self.buttons.0;
