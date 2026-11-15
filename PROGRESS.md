@@ -1,6 +1,6 @@
 # PROGRESS
 
-**Current phase:** 6 APU: automated work done, waiting on owner listening tests (see "Phase 6")
+**Current phase:** 7 CGB is next. Phase 6 APU is done except the Steam Deck audio check, which the owner consciously deferred on 2026-11-15 (phase 7's prerequisites allow this); it is bundled with phase 7's Deck test (see "Phase 6")
 **Last updated:** 2026-11-15
 
 ## Status by phase
@@ -10,7 +10,7 @@
 - [x] 3 PPU  (gate met 2026-11-14, owner visual review done, see "Phase 3" below)
 - [x] 4 Frontend, input, saves  (gate met; minor untested items: left stick, View/Select, see "Phase 4" below)
 - [x] 5 Pokémon Red/Blue  (gate met with owner waivers: first gym not reached, Blue not separately tested; Yellow dropped by owner decision 2026-11-15: owner has no Yellow ROM and won't use it)
-- [~] 6 APU  (code + automated gate items done; owner listening/Deck items open, see "Phase 6")
+- [~] 6 APU  (gate met except the Steam Deck audio check, consciously deferred by the owner 2026-11-15; dmg_sound 10 is a documented known failure, see "Phase 6")
 - [ ] 7 CGB
 - [ ] 8 Polish / accuracy
 
