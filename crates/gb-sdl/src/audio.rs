@@ -76,7 +76,7 @@ impl Audio {
             queue,
             rate,
             target,
-            volume: 0.5,
+            volume: 1.0,
             stats: Stats {
                 min_queued: usize::MAX,
                 ..Stats::default()

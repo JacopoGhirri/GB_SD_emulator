@@ -277,7 +277,10 @@ impl Apu {
         }
         let left_vol = f32::from(((nr50 >> 4) & 7) + 1) / 8.0;
         let right_vol = f32::from((nr50 & 7) + 1) / 8.0;
-        (left / 4.0 * left_vol, right / 4.0 * right_vol)
+        // Four channels at full swing sum to +-4; /8 leaves 6 dB of headroom, because the
+        // high-pass filter overshoots when a loud DC step passes through it (a first version
+        // with /4 measured peaks of 1.2, i.e. clipping, on Pokemon Red's title music).
+        (left / 8.0 * left_vol, right / 8.0 * right_vol)
     }
 
     /// One T-cycle of sample generation: box-filter (average) the mix over each output sample.
@@ -379,6 +382,32 @@ mod tests {
         assert!(seen_high && seen_low, "50 % duty square must toggle");
         run(&mut apu, &mut counter, 4_194_304 / 4 / 64 * 3); // > 2 length clocks (256 Hz)
         assert_eq!(apu.read(REG_NR52) & 1, 0, "length ran out");
+    }
+
+    /// Pitch check: a square channel with frequency register 0x700 plays 131072 / (2048 - 0x700)
+    /// = 512 Hz (Pan Docs NR13/NR14), so one emulated second of output has ~512 rising edges.
+    #[test]
+    fn square_pitch_matches_the_frequency_formula() {
+        let mut apu = Apu::new();
+        let mut counter = 0u16;
+        apu.write(0xFF12, 0xF0);
+        apu.write(0xFF13, 0x00);
+        apu.write(0xFF14, 0x87); // trigger, freq high bits = 7 -> 0x700
+        run(&mut apu, &mut counter, 4_194_304 / 4);
+        let mut out = Vec::new();
+        apu.drain_audio(&mut out);
+        let left: Vec<f32> = out.chunks(2).map(|f| f[0]).collect();
+        let mid = (left.iter().cloned().fold(f32::MIN, f32::max)
+            + left.iter().cloned().fold(f32::MAX, f32::min))
+            / 2.0;
+        let edges = left
+            .windows(2)
+            .filter(|w| w[0] < mid && w[1] >= mid)
+            .count();
+        assert!(
+            (510..=514).contains(&edges),
+            "{edges} rising edges per second"
+        );
     }
 
     #[test]
