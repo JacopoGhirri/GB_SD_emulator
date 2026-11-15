@@ -303,10 +303,11 @@ Human gate items (owner-reported 2026-11-15; I did not verify these myself):
 - [x] Steam Deck, Game Mode with the `run.sh` setup: owner reports it "works perfectly". **Owner-confirmed, no detail.**
 - [x] `docs/STEAMDECK.md` written from the working setup (steps marked confirmed/unconfirmed inside).
 - [ ] Gamepad in WSL: not testable (no USB passthrough). Gamepad on the Deck is covered only by the "works perfectly" report.
-- [ ] **Open:** save/Continue round trip on the Deck in Game Mode (not separately confirmed).
-- [ ] **Open:** each Deck button individually (D-pad, stick, A, B, Start, Select).
+- [x] Save/Continue round trip on the Deck in Game Mode: opens, saves, reopens fine. **Owner-confirmed 2026-11-15.**
+- [x] Deck A = GB A, Deck B = GB B (label matching) in Game Mode. **Owner-confirmed 2026-11-15.**
+- [ ] **Open (minor):** D-pad, stick, Start, Select not individually confirmed (owner said only that it works perfectly).
 - [ ] **Open:** `--fullscreen` in Game Mode (working setup does not use it).
-Gate line "human confirmation it runs on the Deck in Game Mode with built-in controls": met on the owner's report; the two open items above are the unverified details.
+Gate line "human confirmation it runs on the Deck in Game Mode with built-in controls": met. Remaining open items are minor: D-pad/stick/Start/Select individually, and `--fullscreen` in Game Mode.
 
 ```
 $ cargo test --workspace   (WSL)

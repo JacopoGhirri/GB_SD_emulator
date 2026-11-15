@@ -60,21 +60,20 @@ changing directory first, and it captures any error text in a log. The working s
 One shortcut plays one ROM (the ROM name is inside `run.sh`). For another game, copy the script and
 shortcut, or edit the ROM name.
 
-## 6. Saves  [save path confirmed in WSL; Deck round trip unconfirmed]
+## 6. Saves  [confirmed in WSL and on the Deck in Game Mode]
 The battery save is written beside the ROM as `<rom>.sav`, so here
 `/home/deck/Desktop/gb_emu/Pokemon_Red.gb.sav`. The script's `cd` is what puts it there, since the ROM
 path is relative. Saves are flushed on quit, window close, focus loss and every 30 s if changed.
 Quit from Game Mode with Steam button, Exit game (or Esc with a keyboard).
 
 - Save, quit, relaunch, Continue works in WSL (WSLg window).  [confirmed]
-- The same round trip on the Deck in Game Mode.  [unconfirmed]
+- The same round trip on the Deck in Game Mode: opens, saves, reopens fine.  [confirmed]
 
 ## 7. When something goes wrong
 Read `/home/deck/gb_log.txt` (it is overwritten at every launch). Errors such as `cannot read ROM ...`
 appear there, because the script redirects stdout and stderr to it.
 
 ## 8. Still unconfirmed on the Deck
-- Save and Continue round trip in Game Mode.
-- Each Deck button individually (D-pad, stick, A, B, Menu/Start, View/Select).
+- D-pad, stick, Menu/Start and View/Select individually (A and B are confirmed: Deck A = GB A, Deck B = GB B).
 - `--fullscreen` in Game Mode (the working setup does not use it).
 - Cause of the original instant close (section 4).
