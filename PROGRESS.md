@@ -1,14 +1,14 @@
 # PROGRESS
 
 **Current phase:** 4 — Frontend, input, saves (phase 3 gate fully met, owner reviewed screenshots 2026-11-14)
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-15
 
 ## Status by phase
 - [x] 0 Bootstrap
 - [x] 1 CPU  (gate met 2026-11-13, see "Phase 1 — CPU: gate status")
 - [x] 2 Bus, timer, cartridge  (gate met 2026-11-14, see "Phase 2" below)
 - [x] 3 PPU  (gate met 2026-11-14, owner visual review done, see "Phase 3" below)
-- [~] 4 Frontend, input, saves  (automated work done; human gate items open, see "Phase 4" below)
+- [~] 4 Frontend, input, saves  (automated work done; most human gate items confirmed, a few open, see "Phase 4" below)
 - [ ] 5 Pokémon Red/Blue
 - [ ] 6 APU
 - [ ] 7 CGB
@@ -295,9 +295,18 @@ Environment as before (WSL Ubuntu, rustc 1.100.0, system libsdl2 2.32.10). **Aut
 - [x] Saves: `<rom>.sav` beside the ROM, atomic temp+rename, flushed on quit/SIGINT/SIGTERM (SDL_QUIT), focus loss and every 30 s if changed; wrong-size save moved to `.sav.bad`.
 - [x] RTC wall-clock mode (frontend only): save footer timestamp, `advance_rtc_seconds` on load. Core default stays deterministic.
 - [x] Errors: missing/garbage ROM, unsupported mapper, bad save give a message and exit 1 (2 for bad arguments), no panics.
-- [ ] **Human:** run at correct speed with keyboard AND gamepad (feel, speed).
-- [ ] **Human:** manual battery save round trip in the frontend with a real battery game.
-- [ ] **Human:** Steam Deck Game Mode run; then correct `docs/STEAMDECK.md` (currently an UNVERIFIED draft).
+
+Human gate items (owner-reported 2026-11-15; I did not verify these myself):
+- [x] WSL (WSLg window), Pokémon Red: runs smoothly, speed correct, keyboard works, no glitches. **Owner-confirmed.**
+- [x] Manual battery save round trip in the frontend (WSL): saved in game, quit, relaunched, Continue restored it. **Owner-confirmed.**
+- [x] Steam Deck, Desktop Mode (Konsole): binary built in WSL and copied, runs. **Owner-confirmed.**
+- [x] Steam Deck, Game Mode with the `run.sh` setup: owner reports it "works perfectly". **Owner-confirmed, no detail.**
+- [x] `docs/STEAMDECK.md` written from the working setup (steps marked confirmed/unconfirmed inside).
+- [ ] Gamepad in WSL: not testable (no USB passthrough). Gamepad on the Deck is covered only by the "works perfectly" report.
+- [ ] **Open:** save/Continue round trip on the Deck in Game Mode (not separately confirmed).
+- [ ] **Open:** each Deck button individually (D-pad, stick, A, B, Start, Select).
+- [ ] **Open:** `--fullscreen` in Game Mode (working setup does not use it).
+Gate line "human confirmation it runs on the Deck in Game Mode with built-in controls": met on the owner's report; the two open items above are the unverified details.
 
 ```
 $ cargo test --workspace   (WSL)
@@ -315,9 +324,19 @@ $ xxd savetest.gb.sav | head -1  ->  00000000: 4200 0000 ...   (8192-byte save w
 $ gb-sdl /nonexistent.gb -> "error: cannot read ROM ...", exit 1;  100-byte ROM -> "too small to contain a header", exit 1
 $ gb-sdl odd.gb (123-byte .sav, expected ~8192) -> warning, moved to odd.gb.sav.bad, exit 0
 ```
-Headless checks used SDL's dummy video driver, so they prove the loop, pacing and save flush, **not** that a window, keyboard or gamepad work. Nobody has seen the real window yet.
+Headless checks used SDL's dummy video driver, so they prove the loop, pacing and save flush, **not** that a window, keyboard or gamepad work; the owner's real-window results are in the checklist above.
+
+Re-run 2026-11-15 after a clean rebuild of the workspace crates (WSL, ROMs present, only the deliberate missing-ROM smoke test prints SKIP):
+```
+test result: ok. 7 passed (gb-cli unit)   3 passed (acid2, 0.29s)   124 passed (gb-core unit)   3 passed (blargg_timing)
+test result: ok. 12 passed (cpu_instrs, 2.38s)   2 passed (determinism)   11 passed (doctor_trace, 55.13s)
+test result: ok. 2 passed (harness_smoke)   7 passed (mooneye)   5 passed (save_roundtrip)   14 passed (gb-sdl)
+clippy --all-targets -D warnings: clean;  cargo fmt --all -- --check: fmt-ok
+```
 
 ### Phase 4 decisions
+- **Gamepad face buttons match by label** (2026-11-15): Deck A = GB A, Deck B = GB B. This is *not* the Nintendo physical layout; `--swap-ab` gives that. Earlier plan text claiming it matched the physical layout was wrong and is fixed (phase file, `input.rs` comment).
+- **Game Mode launch uses a `run.sh` wrapper** (`cd` to the folder, run `./gb-sdl <rom>` with output to `~/gb_log.txt`); Steam Target = `run.sh`, Start In = the folder, Launch Options empty. Controller layout "Gamepad With Joystick Trackpad"; avoid the TF2 (keyboard/mouse) layout. Details in `docs/STEAMDECK.md`.
 - **Build env:** WSL with system `libsdl2-dev` (owner choice); CI installs `libsdl2-dev`. No `bundled` feature.
 - **Dependency:** `sdl2` 0.37 for `gb-sdl` (window, texture, keyboard, GameController). No clap in `gb-sdl`: hand-rolled argument parsing.
 - **Save location:** `<rom>.sav` beside the ROM (not an XDG dir).
@@ -327,6 +346,8 @@ Headless checks used SDL's dummy video driver, so they prove the loop, pacing an
 - **Window events:** `--frames N` is still paced (that is how the 5.012 s figure was measured).
 
 ### Phase 4 known issues
+- **Game Mode instant close, cause UNCONFIRMED.** Launching the binary directly from Steam closed immediately; the wrapper fixed it. Suspects: working directory, relative ROM path, or `--fullscreen` under Game Mode. Nobody isolated which one.
+- **WSL test cache gotcha (2026-11-15):** the cached test binaries in `~/gb-target` had a stale baked-in `CARGO_MANIFEST_DIR` (`.../Desktop/Desktop/Desktop/...`), so ROM tests printed SKIP and passed in 0.00 s. `cargo clean -p gb-core -p gb-cli -p gb-sdl` fixed it. If a ROM suite finishes instantly, check for SKIP with `-- --nocapture`.
 - Focus-loss flush and hot-plug code paths are untested without real devices.
 - A crash (panic) does not flush the save; only quit, signals and the 30 s timer do.
 - Save write failures print an error and are retried at the next flush; they do not stop the game.
