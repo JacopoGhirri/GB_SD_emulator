@@ -3,6 +3,7 @@
 //! Cartridge, bus, SM83 CPU, timer, DMA and (phase 3) the DMG PPU. No APU yet; audio methods
 //! return placeholder values.
 
+pub mod apu;
 pub mod bus;
 pub mod cartridge;
 pub mod cpu;

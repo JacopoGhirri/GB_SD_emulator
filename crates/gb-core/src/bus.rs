@@ -4,6 +4,7 @@
 //! Every CPU memory access calls [`Bus::tick`], so an instruction's cycle count *emerges* from
 //! the accesses it makes. Internal delay cycles call [`Bus::idle`].
 
+use crate::apu::Apu;
 use crate::cartridge::Cartridge;
 use crate::dma::Dma;
 use crate::interrupts::{Interrupt, Interrupts};
@@ -44,6 +45,7 @@ const DOCTOR_LY: u8 = 0x90;
 pub struct Bus {
     cartridge: Cartridge,
     ppu: Ppu,
+    apu: Apu,
     wram: [u8; 0x2000],
     hram: [u8; 0x7F],
     /// Plain storage for I/O registers that have no behaviour yet.
@@ -66,6 +68,7 @@ impl Bus {
         Bus {
             cartridge,
             ppu: Ppu::new(),
+            apu: Apu::new(),
             wram: [0; 0x2000],
             hram: [0; 0x7F],
             io: std::array::from_fn(|i| io::power_up_value(IO_START + i as u16)),
@@ -204,6 +207,9 @@ impl Bus {
             REG_P1 => self.joypad.read(),
             REG_SB | REG_SC => self.serial.read(addr),
             REG_DIV..=REG_TAC => self.timer.read(addr),
+            io::REG_NR10..=io::REG_NR52 | io::WAVE_RAM_START..=io::WAVE_RAM_END => {
+                self.apu.read(addr)
+            }
             REG_LY if self.doctor_mode => DOCTOR_LY,
             REG_DMA => self.io[(addr - IO_START) as usize] | io::read_mask(addr),
             ppu::REG_LCDC..=ppu::REG_WX => self.ppu.read_reg(addr),
@@ -215,6 +221,9 @@ impl Bus {
         match addr {
             REG_IF => self.interrupts.write_flag(value),
             REG_DIV..=REG_TAC => self.timer.write(addr, value),
+            io::REG_NR10..=io::REG_NR52 | io::WAVE_RAM_START..=io::WAVE_RAM_END => {
+                self.apu.write(addr, value)
+            }
             REG_SB | REG_SC => self.serial.write(addr, value),
             REG_P1 => {
                 if self.joypad.write(value) {
