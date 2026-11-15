@@ -1,6 +1,7 @@
 //! Local-only game replay tests (phase 5). Never runs in CI: the ROMs are the owner's own.
 //!
-//! For every `tests/expected/local/<name>.hashes` it looks for `roms/<name>.gb` and
+//! For every `tests/expected/local/<name>.hashes` it looks for `roms/<rom>.gb` (`<rom>` is `<name>`
+//! up to its first dot, so `pokemon_red.run2` uses `pokemon_red.gb`) and
 //! `tests/expected/local/<name>.input` (an input script recorded with `gb-sdl --record`), replays
 //! the script from a fresh boot and compares the framebuffer hash at each listed frame count.
 //! Each line of a `.hashes` file is `<frames> <hex hash>`. Hashes are added only after the owner
@@ -53,8 +54,10 @@ fn approved_replays_match() {
         if path.extension().and_then(|e| e.to_str()) != Some("hashes") {
             continue;
         }
+        // `<rom>.hashes` or `<rom>.<label>.hashes` (several recordings of the same ROM).
         let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-        let rom_path = root.join("roms").join(format!("{name}.gb"));
+        let rom_name = name.split('.').next().unwrap_or(&name);
+        let rom_path = root.join("roms").join(format!("{rom_name}.gb"));
         let input_path = dir.join(format!("{name}.input"));
         let (Ok(rom), Ok(input)) = (
             std::fs::read(&rom_path),

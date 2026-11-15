@@ -1,6 +1,6 @@
 # PROGRESS
 
-**Current phase:** 5 — Pokémon Red/Blue (phase 4 gate met; owner chose to proceed 2026-11-15 with left stick and View/Select still untested)
+**Current phase:** 5 done (Pokémon Red/Blue gate met with owner waivers, see "Phase 5 gate"); phase 6 APU is next
 **Last updated:** 2026-11-15
 
 ## Status by phase
@@ -9,7 +9,7 @@
 - [x] 2 Bus, timer, cartridge  (gate met 2026-11-14, see "Phase 2" below)
 - [x] 3 PPU  (gate met 2026-11-14, owner visual review done, see "Phase 3" below)
 - [x] 4 Frontend, input, saves  (gate met; minor untested items: left stick, View/Select, see "Phase 4" below)
-- [~] 5 Pokémon Red/Blue  (in progress; Yellow dropped by owner decision 2026-11-15: owner has no Yellow ROM and won't use it)
+- [x] 5 Pokémon Red/Blue  (gate met with owner waivers: first gym not reached, Blue not separately tested; Yellow dropped by owner decision 2026-11-15: owner has no Yellow ROM and won't use it)
 - [ ] 6 APU
 - [ ] 7 CGB
 - [ ] 8 Polish / accuracy
@@ -380,9 +380,22 @@ test result: ok. 2 passed; 0 failed   (24.17 s)
 - **Per-game hack grep:** searched `crates/` for "pokemon" and for `title ==`/`.title` uses. Only hits: header parsing, one unit-test fixture titled "POKEMON RED", and printing the title in the CLI/frontend. No per-game code.
 - **Bugs found so far:** none.
 
-### Phase 5 gate — still open
-- [ ] Owner confirms Red/Blue plays from new game through the **first gym** (recording #1 stops before Brock).
-- [ ] Save → quit → relaunch → Continue on desktop and on the Deck (done for Red in phase 4; re-confirm for this gate).
-- [x] No panics/hangs over a long scripted soak (Red, 13.6 min). Blue not run.
-- [x] No bugs fixed, so nothing to log.
-- [x] No per-game special cases (grep above).
+### Phase 5 — Red recording #2 and gate (2026-11-15)
+- Owner played ~22.4 min (80,740 frames) from a fresh boot: rival in Oak's lab, starter Squirtle, levelling, a wild Pidgey fight, walking on routes. Owner reports no glitches. Replay deterministic twice (final hash `c28d93c11a5d06d5`). I viewed frames 15000, 30000, 45000, 60000, 75000, 80740; owner approved. Hashes in `tests/expected/local/pokemon_red.run2.hashes` (harness now accepts `<rom>.<label>.hashes`).
+```
+$ cargo test --workspace   (WSL, ROMs present)
+gb-cli 7 + 3 passed; gb-core unit 128; blargg_timing 3; cpu_instrs 12; determinism 2; doctor_trace 11 (51 s);
+harness_smoke 2; mooneye 7; pokemon_local 2 (65 s); save_roundtrip 5; gb-sdl 16 -> all "test result: ok", 0 failed
+$ cargo clippy --workspace --all-targets -- -D warnings -> clean;  cargo fmt -> applied
+pokemon_red: 4 hashes match after 48789 frames
+pokemon_red.run2: 6 hashes match after 80740 frames
+```
+Total recorded play replayed in tests: ~36 min emulated, no panic or hang.
+
+### Phase 5 gate
+- [~] Red plays from new game with no visible glitches: owner played ~36 min over two recordings (intro, name entry, rival fights, wild battles, menus, routes), no glitches. **Owner waived reaching the first gym (2026-11-15, "no need to reach the gym")**: the gate wording asked for it; this is an owner scope decision, not a test I ran.
+- [x] Blue: owner states it runs on the Deck and that if Red does both do; **not separately recorded or tested by me** (owner decision: no Blue run needed).
+- [x] Save → quit → relaunch → Continue on desktop and Deck: **owner-reported** working on both (Red confirmed in phase 4; owner says the same holds for Blue). Not verifiable by replay since recordings ignore saves.
+- [x] No panics/hangs over a long scripted soak (replays of 48,789 and 80,740 frames).
+- [x] Bugs fixed: none were found, so nothing to log.
+- [x] No per-game special cases (grep, see above).
