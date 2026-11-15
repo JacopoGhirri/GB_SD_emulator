@@ -306,9 +306,10 @@ Human gate items (owner-reported 2026-11-15; I did not verify these myself):
 - [x] Save/Continue round trip on the Deck in Game Mode: opens, saves, reopens fine. **Owner-confirmed 2026-11-15.**
 - [x] Deck A = GB A, Deck B = GB B (label matching) in Game Mode. **Owner-confirmed 2026-11-15.**
 - [x] Deck Menu (three-line button) = GB Start: opened the in-game menu, used to save. **Owner-confirmed 2026-11-15.**
-- [ ] **Open (minor):** D-pad, stick and Select not individually confirmed (owner said only that it works perfectly).
+- [x] Deck D-pad moves around the game and menus. **Owner-confirmed 2026-11-15.**
+- [ ] **Open (minor):** left stick (not tested) and View/Select (not reported).
 - [ ] **Open:** `--fullscreen` in Game Mode (working setup does not use it).
-Gate line "human confirmation it runs on the Deck in Game Mode with built-in controls": met. Remaining open items are minor: D-pad/stick/Select individually, and `--fullscreen` in Game Mode.
+Gate line "human confirmation it runs on the Deck in Game Mode with built-in controls": met. Remaining open items are minor: left stick and View/Select, and `--fullscreen` in Game Mode.
 
 ```
 $ cargo test --workspace   (WSL)
