@@ -462,6 +462,15 @@ Environment as before (WSL Ubuntu, rustc 1.100.0). Plan: tasks 1-10 in the appro
 - [x] Task 1: CGB mode = CGB hardware + CGB-capable header; `gb-cli`/`gb-sdl` pick the model from the header (`GameBoy::default_model_for`); `--model` overrides. Commit `067c0df`.
 - [x] Task 2: CGB and DMG-compat post-boot CPU registers. Commit `af85bc5`.
 - [x] Task 3: VRAM bank (VBK FF4F, `Ppu::vram1`) and 8 x 4 KiB WRAM banks (SVBK FF70); DMG ignores both. 3 new unit tests. Full `cargo test --workspace` re-run (WSL): every suite ok, 0 failed (gb-core unit 140, doctor_trace 11, pokemon_local 2, mooneye 7, cpu_instrs 12, ... gb-sdl 20); clippy `--all-targets -D warnings` clean.
+- [x] Task 4: CGB palettes (BCPS/BCPD/OCPS/OCPD, auto-increment, blocked in mode 3), BG attributes, CGB sprites (OAM-index priority, bank, palette), LCDC.0 master priority; DMG renderer untouched. **cgb-acid2 matches** (WSL):
+```
+$ gb-cli run cgb-acid2.gbc --frames 30 --compare cgb-acid2.png
+compare passed: final frame matches tests/roms/.../cgb-acid2/cgb-acid2.png
+$ ... --frames 1 (control, must fail)
+compare FAILED: 10187 pixels differ from .../cgb-acid2.png
+$ cargo test --workspace -> every "test result" ok, 0 failed (gb-cli acid2 5 passed incl. 2 new cgb-acid2; gb-core unit 146; doctor_trace 11; pokemon_local 2; mooneye 7)
+```
+  Finding: the first attempt with truncating `x*255/31` differed in 368 pixels (only 13 -> 106 vs 107 and 21 -> 172 vs 173); the reference needs **rounded** scaling `(x*255+15)/31`, now used (the phase file said "simple x*255/31"; the test decided). Bit replication `(x<<3)|(x>>2)` gives the same on those two values, so cgb-acid2 cannot tell the two apart. 6 new renderer unit tests.
 
 ### Phase 7 open follow-ups (record and revisit)
 - **Mooneye CGB boot ROMs fail** (`misc/boot_regs-cgb`, `boot_div-cgb0`, `boot_div-cgbABCDE`, `boot_hwio-C`): all print `mooneye: FAIL after ~93-95k instructions, B..L = 42`. Cause not yet known (the register values did not change the failing instruction count of `boot_regs-cgb`, 94358). **Re-run after task 7 and record the exact failing check here**, so it is a defined phase-8 follow-up if still failing.

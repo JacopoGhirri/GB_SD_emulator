@@ -58,6 +58,12 @@ pub struct PpuIrq {
 /// VBK (0xFF4F): VRAM bank select, CGB mode only (Pan Docs "VRAM Banks"). Bit 0 selects the
 /// bank; the other bits read as 1.
 pub const REG_VBK: u16 = 0xFF4F;
+/// CGB colour palette registers (Pan Docs "LCD Color Palettes (CGB only)"): index/data pairs for
+/// the BG and OBJ palette RAM.
+pub const REG_BCPS: u16 = 0xFF68;
+pub const REG_BCPD: u16 = 0xFF69;
+pub const REG_OCPS: u16 = 0xFF6A;
+pub const REG_OCPD: u16 = 0xFF6B;
 
 pub struct Ppu {
     /// VRAM bank 0 (tile data and the tile maps).
@@ -68,6 +74,12 @@ pub struct Ppu {
     vbk: u8,
     /// CGB mode: VBK works. In DMG mode VBK reads 0xFF and writes are ignored.
     cgb: bool,
+    /// CGB palette RAM: 8 palettes x 4 colours x 2 bytes (RGB555, little-endian), BG and OBJ.
+    bg_pal: [u8; 64],
+    obj_pal: [u8; 64],
+    /// BCPS/OCPS: bit 7 auto-increment after a data write, bits 0-5 the byte index.
+    bcps: u8,
+    ocps: u8,
     oam: [u8; OAM_SIZE],
     lcdc: u8,
     /// Only the four writable STAT bits (3..=6); mode and LYC flag are computed.
@@ -112,6 +124,12 @@ impl Ppu {
             vram1: [0; VRAM_SIZE],
             vbk: 0,
             cgb: false,
+            // The CGB boot ROM leaves white in the BG palettes; OBJ palette RAM is undefined
+            // after boot, white is a safe choice.
+            bg_pal: [0xFF, 0x7F].repeat(32).try_into().expect("64 bytes"),
+            obj_pal: [0xFF, 0x7F].repeat(32).try_into().expect("64 bytes"),
+            bcps: 0,
+            ocps: 0,
             oam: [0; OAM_SIZE],
             lcdc: 0x91,
             stat_enable: 0,
@@ -153,6 +171,56 @@ impl Ppu {
     pub fn write_vbk(&mut self, value: u8) {
         if self.cgb {
             self.vbk = value & 1;
+        }
+    }
+
+    /// Read BCPS/BCPD/OCPS/OCPD. Palette data is unreadable (0xFF) during mode 3 (Pan Docs
+    /// "Accessing palette RAM"). Does not exist on DMG (0xFF).
+    pub fn read_palette_reg(&self, addr: u16) -> u8 {
+        if !self.cgb {
+            return 0xFF;
+        }
+        match addr {
+            REG_BCPS => self.bcps | 0x40,
+            REG_OCPS => self.ocps | 0x40,
+            REG_BCPD if self.mode() != MODE_DRAWING => self.bg_pal[usize::from(self.bcps & 0x3F)],
+            REG_OCPD if self.mode() != MODE_DRAWING => self.obj_pal[usize::from(self.ocps & 0x3F)],
+            _ => 0xFF,
+        }
+    }
+
+    /// Write BCPS/BCPD/OCPS/OCPD. A data write during mode 3 is lost, but the index still
+    /// auto-increments (Pan Docs).
+    pub fn write_palette_reg(&mut self, addr: u16, value: u8) {
+        if !self.cgb {
+            return;
+        }
+        let blocked = self.mode() == MODE_DRAWING;
+        match addr {
+            REG_BCPS => self.bcps = value & 0xBF,
+            REG_OCPS => self.ocps = value & 0xBF,
+            REG_BCPD => {
+                if !blocked {
+                    self.bg_pal[usize::from(self.bcps & 0x3F)] = value;
+                }
+                self.bcps = Self::auto_increment(self.bcps);
+            }
+            REG_OCPD => {
+                if !blocked {
+                    self.obj_pal[usize::from(self.ocps & 0x3F)] = value;
+                }
+                self.ocps = Self::auto_increment(self.ocps);
+            }
+            _ => {}
+        }
+    }
+
+    /// Index register after a data write: bit 7 set means the 6-bit index advances (wrapping).
+    fn auto_increment(spec: u8) -> u8 {
+        if spec & 0x80 != 0 {
+            0x80 | (spec.wrapping_add(1) & 0x3F)
+        } else {
+            spec
         }
     }
 

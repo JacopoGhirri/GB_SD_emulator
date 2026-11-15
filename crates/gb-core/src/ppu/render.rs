@@ -35,6 +35,24 @@ const ATTR_Y_FLIP: u8 = 0x40;
 const ATTR_X_FLIP: u8 = 0x20;
 const ATTR_PALETTE_OBP1: u8 = 0x10;
 
+// CGB BG map attribute bits (Pan Docs "BG Map Attributes"). The sprite attribute byte shares
+// bit 3 (tile bank) and bits 0-2 (palette number), and bits 5-7 with the DMG layout above.
+const CGB_ATTR_TILE_BANK: u8 = 0x08;
+const CGB_ATTR_X_FLIP: u8 = 0x20;
+const CGB_ATTR_Y_FLIP: u8 = 0x40;
+const CGB_ATTR_BG_PRIORITY: u8 = 0x80;
+
+/// Colour `idx` (0..=3) of palette `pal` (0..=7) in a 64-byte CGB palette RAM, as 0x00RRGGBB.
+/// Entries are little-endian RGB555: `0bBBBBBGGGGGRRRRR`. Scaling is x*255/31 *rounded* to nearest:
+/// the cgb-acid2 reference image needs 13 -> 107 and 21 -> 173, which truncation misses by one.
+/// No colour correction (out of scope for phase 7).
+pub(super) fn cgb_colour(ram: &[u8; 64], pal: u8, idx: u8) -> u32 {
+    let i = usize::from(pal) * 8 + usize::from(idx) * 2;
+    let v = u16::from_le_bytes([ram[i], ram[i + 1]]);
+    let scale = |c: u16| (u32::from(c & 0x1F) * 255 + 15) / 31;
+    (scale(v) << 16) | (scale(v >> 5) << 8) | scale(v >> 10)
+}
+
 /// The window's top-left corner is at screen x = WX - 7 (Pan Docs "Window").
 const WINDOW_X_OFFSET: i32 = 7;
 /// WX values of 167 and above put the window fully off the right edge.
@@ -43,6 +61,10 @@ const WINDOW_MAX_WX: u8 = 166;
 impl Ppu {
     /// Draw line `self.ly` into the back buffer, and update the window line counter.
     pub(super) fn render_line(&mut self) {
+        if self.cgb {
+            self.render_line_cgb();
+            return;
+        }
         let y = usize::from(self.ly);
         // Colour index (0..=3, before palette) of each BG/window pixel, kept for sprite priority.
         let mut bg_index = [0u8; SCREEN_WIDTH];
@@ -156,6 +178,145 @@ impl Ppu {
                         self.obp0
                     };
                     *slot = shade(palette, idx);
+                }
+                break; // this opaque pixel decided the winner, hidden or not
+            }
+        }
+    }
+
+    /// CGB version of `render_line` (Pan Docs "Tile Maps" attributes, "OAM" CGB flags, "Palettes").
+    ///
+    /// Differences from DMG: every BG/window tile has an attribute byte in VRAM bank 1 at the same
+    /// map address (palette, tile bank, flips, BG-over-OBJ priority); colours come from RGB555
+    /// palette RAM; sprites have a tile bank bit and a palette number; sprites are prioritised by
+    /// OAM index only; LCDC bit 0 is the "master priority" switch, not "BG enable".
+    fn render_line_cgb(&mut self) {
+        let y = usize::from(self.ly);
+        // Per pixel: colour index 0..=3, BG palette number, and whether the tile's attribute
+        // says "BG over OBJ".
+        let mut bg = [(0u8, 0u8, false); SCREEN_WIDTH];
+
+        let window_on_line = self.window_visible_on_line();
+        let unsigned = self.lcdc & LCDC_TILE_DATA_UNSIGNED != 0;
+        let bg_map = if self.lcdc & LCDC_BG_MAP_SELECT != 0 {
+            MAP1_OFFSET
+        } else {
+            MAP0_OFFSET
+        };
+        let win_map = if self.lcdc & LCDC_WINDOW_MAP_SELECT != 0 {
+            MAP1_OFFSET
+        } else {
+            MAP0_OFFSET
+        };
+        let window_x = i32::from(self.wx) - WINDOW_X_OFFSET;
+        let bg_y = (y + usize::from(self.scy)) & 0xFF;
+
+        for (x, slot) in bg.iter_mut().enumerate() {
+            let (map, px, py) = if window_on_line && x as i32 >= window_x {
+                (
+                    win_map,
+                    (x as i32 - window_x) as usize,
+                    usize::from(self.window_line),
+                )
+            } else {
+                (bg_map, (x + usize::from(self.scx)) & 0xFF, bg_y)
+            };
+            let map_addr = map + (py / 8) * 32 + px / 8;
+            let id = self.vram[map_addr];
+            let attr = self.vram1[map_addr];
+            let tile_vram = if attr & CGB_ATTR_TILE_BANK != 0 {
+                &self.vram1
+            } else {
+                &self.vram
+            };
+            let col = if attr & CGB_ATTR_X_FLIP != 0 {
+                7 - px % 8
+            } else {
+                px % 8
+            };
+            let row = if attr & CGB_ATTR_Y_FLIP != 0 {
+                7 - py % 8
+            } else {
+                py % 8
+            };
+            let idx = tile_pixel(tile_vram, bg_tile_offset(id, unsigned), col, row);
+            *slot = (idx, attr & 7, attr & CGB_ATTR_BG_PRIORITY != 0);
+        }
+        if window_on_line {
+            self.window_line = self.window_line.wrapping_add(1);
+        }
+
+        let mut line = [0u32; SCREEN_WIDTH];
+        for (px, &(idx, pal, _)) in line.iter_mut().zip(bg.iter()) {
+            *px = cgb_colour(&self.bg_pal, pal, idx);
+        }
+        if self.lcdc & LCDC_SPRITES_ENABLE != 0 {
+            self.draw_sprites_cgb(y as i32, &bg, &mut line);
+        }
+        self.back[y * SCREEN_WIDTH..(y + 1) * SCREEN_WIDTH].copy_from_slice(&line);
+    }
+
+    /// CGB sprites: first 10 on the line in OAM order; for each pixel the lowest OAM index with
+    /// an opaque pixel wins (no X-coordinate priority in CGB mode).
+    fn draw_sprites_cgb(
+        &self,
+        y: i32,
+        bg: &[(u8, u8, bool); SCREEN_WIDTH],
+        line: &mut [u32; SCREEN_WIDTH],
+    ) {
+        let height = if self.lcdc & LCDC_SPRITE_SIZE_16 != 0 {
+            16
+        } else {
+            8
+        };
+        let master_priority = self.lcdc & LCDC_BG_WINDOW_ENABLE != 0;
+        // (x, top y, tile, attributes) in OAM order.
+        let mut selected: Vec<(i32, i32, u8, u8)> = Vec::with_capacity(MAX_SPRITES_PER_LINE);
+        for i in 0..SPRITE_COUNT {
+            let e = &self.oam[i * OAM_ENTRY_BYTES..(i + 1) * OAM_ENTRY_BYTES];
+            let top = i32::from(e[0]) - SPRITE_Y_OFFSET;
+            if y >= top && y < top + height {
+                selected.push((i32::from(e[1]) - SPRITE_X_OFFSET, top, e[2], e[3]));
+                if selected.len() == MAX_SPRITES_PER_LINE {
+                    break;
+                }
+            }
+        }
+
+        for (sx, slot) in line.iter_mut().enumerate() {
+            for &(x, top, tile, attr) in &selected {
+                let col = sx as i32 - x;
+                if !(0..8).contains(&col) {
+                    continue;
+                }
+                let mut row = (y - top) as usize;
+                if attr & ATTR_Y_FLIP != 0 {
+                    row = height as usize - 1 - row;
+                }
+                let col = if attr & ATTR_X_FLIP != 0 {
+                    7 - col
+                } else {
+                    col
+                } as usize;
+                let tile = if height == 16 { tile & 0xFE } else { tile };
+                let tile_vram = if attr & CGB_ATTR_TILE_BANK != 0 {
+                    &self.vram1
+                } else {
+                    &self.vram
+                };
+                let idx = tile_pixel(tile_vram, usize::from(tile) * 16, col, row);
+                if idx == 0 {
+                    continue; // transparent: look at the next sprite
+                }
+                let (bg_idx, _, bg_attr_priority) = bg[sx];
+                // With master priority on, an opaque BG pixel covers the sprite if either the
+                // sprite's own flag or the BG tile's attribute asks for it. With it off, sprites
+                // are always on top.
+                let bg_wins = master_priority
+                    && bg_idx != 0
+                    && (attr & ATTR_BG_OVER_OBJ != 0 || bg_attr_priority);
+                if !bg_wins {
+                    *slot = cgb_colour(&self.obj_pal, attr & 7, idx);
                 }
                 break; // this opaque pixel decided the winner, hidden or not
             }
@@ -478,5 +639,139 @@ mod tests {
         p.lcdc &= !LCDC_SPRITES_ENABLE;
         set_sprite(&mut p, 0, 0, 0, 1, 0);
         assert!(line(&mut p, 0).iter().all(|&c| c == SHADES[0]));
+    }
+
+    // ---- CGB ----
+
+    fn cgb_ppu() -> Ppu {
+        let mut p = ppu();
+        p.set_cgb(true);
+        p.lcdc |= LCDC_SPRITES_ENABLE;
+        p
+    }
+
+    /// Set colour `idx` of BG palette `pal` through the real register interface.
+    fn set_bg_colour(p: &mut Ppu, pal: u8, idx: u8, rgb555: u16) {
+        p.write_palette_reg(crate::ppu::REG_BCPS, 0x80 | (pal * 8 + idx * 2));
+        p.write_palette_reg(crate::ppu::REG_BCPD, rgb555 as u8);
+        p.write_palette_reg(crate::ppu::REG_BCPD, (rgb555 >> 8) as u8);
+    }
+
+    fn set_obj_colour(p: &mut Ppu, pal: u8, idx: u8, rgb555: u16) {
+        p.write_palette_reg(crate::ppu::REG_OCPS, 0x80 | (pal * 8 + idx * 2));
+        p.write_palette_reg(crate::ppu::REG_OCPD, rgb555 as u8);
+        p.write_palette_reg(crate::ppu::REG_OCPD, (rgb555 >> 8) as u8);
+    }
+
+    #[test]
+    fn rgb555_conversion_is_little_endian_rgb_and_rounds() {
+        let mut ram = [0u8; 64];
+        ram[2] = 0x1F; // colour 1 of palette 0: 0x001F = pure red
+        assert_eq!(cgb_colour(&ram, 0, 1), 0xFF0000);
+        ram[4] = 0xE0;
+        ram[5] = 0x03; // 0x03E0 = pure green
+        assert_eq!(cgb_colour(&ram, 0, 2), 0x00FF00);
+        ram[6] = 0x00;
+        ram[7] = 0x7C; // 0x7C00 = pure blue
+        assert_eq!(cgb_colour(&ram, 0, 3), 0x0000FF);
+        // 13 -> 107 and 21 -> 173 are the values the cgb-acid2 reference image uses.
+        ram[8] = 13;
+        ram[16] = 21;
+        assert_eq!(cgb_colour(&ram, 1, 0) & 0xFF0000, 107 << 16);
+        assert_eq!(cgb_colour(&ram, 2, 0) & 0xFF0000, 173 << 16);
+    }
+
+    #[test]
+    fn palette_registers_auto_increment_and_wrap() {
+        use crate::ppu::{REG_BCPD, REG_BCPS};
+        let mut p = cgb_ppu();
+        p.lcdc = 0; // LCD off: mode 0, palette RAM accessible
+        p.write_palette_reg(REG_BCPS, 0x80 | 62);
+        p.write_palette_reg(REG_BCPD, 0xAA);
+        p.write_palette_reg(REG_BCPD, 0xBB);
+        assert_eq!(
+            p.read_palette_reg(REG_BCPS),
+            0x80 | 0x40,
+            "index wrapped to 0"
+        );
+        assert_eq!((p.bg_pal[62], p.bg_pal[63]), (0xAA, 0xBB));
+        // Without auto-increment the index stays put and reads see the same byte.
+        p.write_palette_reg(REG_BCPS, 5);
+        p.write_palette_reg(REG_BCPD, 0x42);
+        assert_eq!(p.read_palette_reg(REG_BCPD), 0x42);
+        assert_eq!(p.read_palette_reg(REG_BCPS), 5 | 0x40);
+    }
+
+    #[test]
+    fn palette_data_is_blocked_in_mode_3_but_the_index_still_increments() {
+        use crate::ppu::{REG_BCPD, REG_BCPS};
+        let mut p = cgb_ppu();
+        p.dot = 100; // inside mode 3 (80..252) on line 0 with the LCD on
+        assert_eq!(p.mode(), 3);
+        p.write_palette_reg(REG_BCPS, 0x80);
+        p.write_palette_reg(REG_BCPD, 0x12);
+        assert_eq!(p.bg_pal[0], 0xFF, "write lost (palette starts white)");
+        assert_eq!(
+            p.read_palette_reg(REG_BCPS),
+            0x80 | 0x40 | 1,
+            "index advanced"
+        );
+        assert_eq!(p.read_palette_reg(REG_BCPD), 0xFF, "reads blocked");
+    }
+
+    #[test]
+    fn cgb_bg_attributes_palette_bank_and_flips() {
+        let mut p = cgb_ppu();
+        set_bg_colour(&mut p, 3, 1, 0x001F); // palette 3, colour 1 = red
+        set_bg_colour(&mut p, 3, 2, 0x03E0); // colour 2 = green
+        set_tile(&mut p, 1, [0, 1, 1, 1, 1, 1, 1, 0]);
+        // Tile 1 in bank 1 is different: colour 2 on the left pixel only.
+        for y in 0..8 {
+            p.vram1[16 + y * 2 + 1] = 0x80;
+        }
+        p.vram[0x1800] = 1;
+        p.vram1[0x1800] = 3; // palette 3, bank 0
+        let l = line(&mut p, 0);
+        assert_eq!(&l[0..3], &[cgb_colour(&p.bg_pal, 0, 0), 0xFF0000, 0xFF0000]);
+        p.vram1[0x1800] = 3 | CGB_ATTR_TILE_BANK;
+        let l = line(&mut p, 0);
+        assert_eq!(l[0], 0x00FF00, "bank 1 tile data, colour 2");
+        assert_eq!(l[1], cgb_colour(&p.bg_pal, 3, 0));
+        p.vram1[0x1800] = 3 | CGB_ATTR_TILE_BANK | CGB_ATTR_X_FLIP;
+        let l = line(&mut p, 0);
+        assert_eq!(l[7], 0x00FF00, "X flip moves the left pixel to the right");
+    }
+
+    #[test]
+    fn cgb_sprite_priority_is_by_oam_index_not_x() {
+        let mut p = cgb_ppu();
+        set_obj_colour(&mut p, 0, 1, 0x001F); // red
+        set_obj_colour(&mut p, 1, 1, 0x03E0); // green
+        set_tile(&mut p, 1, [1; 8]);
+        // OAM 0 is further right than OAM 1; DMG would let the smaller X (OAM 1) win.
+        p.oam[0..4].copy_from_slice(&[16, 12, 1, 0]); // x = 4, palette 0
+        p.oam[4..8].copy_from_slice(&[16, 8, 1, 1]); // x = 0, palette 1
+        let l = line(&mut p, 0);
+        assert_eq!(l[4], 0xFF0000, "overlap: lowest OAM index wins");
+        assert_eq!(l[0], 0x00FF00);
+    }
+
+    #[test]
+    fn cgb_master_priority_and_bg_priority_attribute() {
+        let mut p = cgb_ppu();
+        set_bg_colour(&mut p, 0, 1, 0x7C00); // blue
+        set_obj_colour(&mut p, 0, 1, 0x001F); // red
+        set_tile(&mut p, 1, [1; 8]);
+        p.vram[0x1800] = 1; // opaque BG tile (colour 1)
+        p.oam[0..4].copy_from_slice(&[16, 8, 1, 0]); // sprite over the same pixels
+        assert_eq!(line(&mut p, 0)[0], 0xFF0000, "sprite in front by default");
+        p.vram1[0x1800] = CGB_ATTR_BG_PRIORITY;
+        assert_eq!(
+            line(&mut p, 0)[0],
+            0x0000FF,
+            "BG attribute priority hides the sprite"
+        );
+        p.lcdc &= !LCDC_BG_WINDOW_ENABLE; // master priority off: sprites always on top
+        assert_eq!(line(&mut p, 0)[0], 0xFF0000);
     }
 }

@@ -259,6 +259,7 @@ impl Bus {
             REG_LY if self.doctor_mode => DOCTOR_LY,
             REG_DMA => self.io[(addr - IO_START) as usize] | io::read_mask(addr),
             ppu::REG_VBK => self.ppu.read_vbk(),
+            ppu::REG_BCPS..=ppu::REG_OCPD => self.ppu.read_palette_reg(addr),
             REG_SVBK if self.cgb_mode => 0xF8 | self.svbk,
             ppu::REG_LCDC..=ppu::REG_WX => self.ppu.read_reg(addr),
             _ => self.io[(addr - IO_START) as usize] | io::read_mask(addr),
@@ -287,6 +288,7 @@ impl Bus {
                 self.dma.start(value);
             }
             ppu::REG_VBK => self.ppu.write_vbk(value),
+            ppu::REG_BCPS..=ppu::REG_OCPD => self.ppu.write_palette_reg(addr, value),
             REG_SVBK if self.cgb_mode => self.svbk = value & 7,
             ppu::REG_LCDC..=ppu::REG_WX => {
                 if self.ppu.write_reg(addr, value) {

@@ -97,3 +97,47 @@ fn scribbltests_match_their_references() {
         assert!(out.status.success(), "scribbltests/{dir} differs:\n{text}");
     }
 }
+
+fn run_cgb_acid2(frames: &str) -> Option<std::process::Output> {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/roms/game-boy-test-roms-v7.0/cgb-acid2");
+    let (rom, reference) = (dir.join("cgb-acid2.gbc"), dir.join("cgb-acid2.png"));
+    if !rom.exists() || !reference.exists() {
+        println!("SKIP: cgb-acid2 not found. Run scripts/fetch_test_roms.sh to download it.");
+        return None;
+    }
+    // `--model cgb` is explicit even though the header (0xC0) would pick it.
+    Some(
+        Command::new(env!("CARGO_BIN_EXE_gb-cli"))
+            .arg("run")
+            .arg(&rom)
+            .args(["--model", "cgb", "--frames", frames, "--compare"])
+            .arg(&reference)
+            .output()
+            .expect("failed to run gb-cli"),
+    )
+}
+
+#[test]
+fn cgb_acid2_matches_reference() {
+    let Some(out) = run_cgb_acid2("30") else {
+        return;
+    };
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    println!("{stdout}{stderr}");
+    assert!(
+        out.status.success(),
+        "cgb-acid2 differs from reference:\n{stdout}{stderr}"
+    );
+    assert!(stdout.contains("compare passed"));
+}
+
+/// Control: a 1-frame screenshot must NOT match, so the comparison can fail.
+#[test]
+fn cgb_acid2_comparison_detects_a_wrong_frame() {
+    let Some(out) = run_cgb_acid2("1") else {
+        return;
+    };
+    assert!(!out.status.success());
+}
