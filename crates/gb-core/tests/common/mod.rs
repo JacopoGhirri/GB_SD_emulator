@@ -139,6 +139,22 @@ pub fn run_mooneye_rom_on(
 /// return `(name, verdict text)` per ROM; ROMs for other hardware are listed as "skipped".
 /// Returns `None` with a SKIP line if the directory is absent.
 pub fn mooneye_sweep(dir: &str, max_instructions: u64) -> Option<Vec<(String, bool, String)>> {
+    mooneye_sweep_on(
+        dir,
+        Model::Dmg,
+        gb_core::mooneye::dmg_compatible,
+        max_instructions,
+    )
+}
+
+/// [`mooneye_sweep`] on other hardware: `applies` decides per file name whether the ROM targets
+/// `model` (e.g. `gb_core::mooneye::cgb_compatible` for `Model::Cgb`).
+pub fn mooneye_sweep_on(
+    dir: &str,
+    model: Model,
+    applies: fn(&str) -> bool,
+    max_instructions: u64,
+) -> Option<Vec<(String, bool, String)>> {
     let root = rom_path(dir);
     let Ok(entries) = fs::read_dir(&root) else {
         println!(
@@ -154,11 +170,11 @@ pub fn mooneye_sweep(dir: &str, max_instructions: u64) -> Option<Vec<(String, bo
     names.sort();
     let mut out = Vec::new();
     for name in names {
-        if !gb_core::mooneye::dmg_compatible(&name) {
+        if !applies(&name) {
             println!("{dir}/{name}: skipped (other hardware)");
             continue;
         }
-        let (verdict, n) = run_mooneye_rom(&format!("{dir}/{name}"), max_instructions)?;
+        let (verdict, n) = run_mooneye_rom_on(&format!("{dir}/{name}"), model, max_instructions)?;
         let pass = verdict == gb_core::mooneye::MooneyeVerdict::Pass;
         let text = format!("{verdict:?} after {n} instructions");
         println!(
@@ -176,6 +192,15 @@ pub fn mooneye_sweep(dir: &str, max_instructions: u64) -> Option<Vec<(String, bo
 /// Runs until a finished status appears; returns `(status, text, instructions)`.
 /// `None` (after a SKIP line) if the ROM is absent. `status == 0x80` means it never finished.
 pub fn run_blargg_ram(relative: &str, max_instructions: u64) -> Option<(u8, String, u64)> {
+    run_blargg_ram_on(relative, Model::Dmg, max_instructions)
+}
+
+/// [`run_blargg_ram`] on the given hardware.
+pub fn run_blargg_ram_on(
+    relative: &str,
+    model: Model,
+    max_instructions: u64,
+) -> Option<(u8, String, u64)> {
     let path = rom_path(relative);
     let Ok(bytes) = fs::read(&path) else {
         println!(
@@ -186,7 +211,7 @@ pub fn run_blargg_ram(relative: &str, max_instructions: u64) -> Option<(u8, Stri
     };
     let cart = Cartridge::from_bytes(bytes)
         .unwrap_or_else(|e| panic!("{} is not a valid ROM: {e}", path.display()));
-    let mut gb = GameBoy::new(cart, Model::Dmg);
+    let mut gb = GameBoy::new(cart, model);
     let mut n = 0u64;
     let mut status = 0x80;
     while n < max_instructions {

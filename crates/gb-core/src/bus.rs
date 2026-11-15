@@ -388,7 +388,7 @@ impl Bus {
             }
             REG_LY if self.doctor_mode => DOCTOR_LY,
             REG_DMA => self.io[(addr - IO_START) as usize] | io::read_mask(addr),
-            hdma::REG_HDMA1..=hdma::REG_HDMA5 if self.cgb_hw => self.hdma.read(addr),
+            hdma::REG_HDMA1..=hdma::REG_HDMA5 if self.cgb_mode => self.hdma.read(addr),
             REG_RP if self.cgb_mode => 0x3E | (self.io_reg(addr) & 0xC1),
             REG_OPRI if self.cgb_hw => 0xFE | (self.io_reg(addr) & 1),
             REG_UNDOC_72..=0xFF73 if self.cgb_hw => self.io_reg(addr),
@@ -427,7 +427,7 @@ impl Bus {
                 self.io[(addr - IO_START) as usize] = value;
                 self.dma.start(value);
             }
-            hdma::REG_HDMA1..=hdma::REG_HDMA5 if self.cgb_hw => {
+            hdma::REG_HDMA1..=hdma::REG_HDMA5 if self.cgb_mode => {
                 match self.hdma.write(addr, value) {
                     hdma::Start::Nothing => {}
                     hdma::Start::General(blocks) => {

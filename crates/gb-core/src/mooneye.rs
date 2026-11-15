@@ -70,9 +70,59 @@ pub fn dmg_compatible(file_name: &str) -> bool {
     )
 }
 
+/// Whether a Mooneye ROM is expected to pass on a CGB (revisions B-E, our power-up state).
+///
+/// Same naming scheme as [`dmg_compatible`]. Group letter `C` (cgb + agb + ags) applies; so do
+/// explicit `cgb` suffixes with a revision list containing B-E (`cgbABCDE`, `cgb`), but not
+/// `cgb0` alone (first CGB silicon, different power-up timing). DMG-only (`dmg*`, `G`, `mgb`),
+/// SGB and AGB-only ROMs are "other hardware". A ROM with no suffix runs everywhere.
+pub fn cgb_compatible(file_name: &str) -> bool {
+    let stem = file_name.strip_suffix(".gb").unwrap_or(file_name);
+    let Some((_, suffix)) = stem.rsplit_once('-') else {
+        return true;
+    };
+    if suffix.chars().all(|c| matches!(c, 'G' | 'S' | 'C' | 'A')) {
+        return suffix.contains('C');
+    }
+    if let Some(revs) = suffix.strip_prefix("cgb") {
+        return revs.is_empty() || revs.chars().any(|c| matches!(c, 'B'..='E'));
+    }
+    // Other explicit model tokens (dmg*, mgb, sgb*, agb*, ags) are other hardware; anything
+    // else is not a model suffix at all.
+    !matches!(
+        suffix.split(|c: char| !c.is_ascii_alphabetic()).next(),
+        Some("mgb" | "sgb" | "agb" | "ags")
+    ) && !suffix.starts_with("dmg")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cgb_suffix_rule() {
+        for ok in [
+            "div_write.gb",
+            "unused_hwio-C.gb",
+            "boot_regs-cgb.gb",
+            "boot_div-cgbABCDE.gb",
+            "vblank_stat_intr-C.gb",
+            "foo-GSC.gb",
+        ] {
+            assert!(cgb_compatible(ok), "{ok} should run on CGB");
+        }
+        for skip in [
+            "boot_div-cgb0.gb",
+            "unused_hwio-GS.gb",
+            "boot_regs-dmgABC.gb",
+            "boot_regs-mgb.gb",
+            "boot_regs-sgb.gb",
+            "boot_regs-A.gb",
+            "x-dmg0.gb",
+        ] {
+            assert!(!cgb_compatible(skip), "{skip} is other hardware");
+        }
+    }
 
     #[test]
     fn suffix_rule() {

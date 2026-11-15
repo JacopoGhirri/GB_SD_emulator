@@ -1,6 +1,6 @@
 # PROGRESS
 
-**Current phase:** 7 CGB is next. Phase 6 APU is done except the Steam Deck audio check, which the owner consciously deferred on 2026-11-15 (phase 7's prerequisites allow this); it is bundled with phase 7's Deck test (see "Phase 6")
+**Current phase:** 7 CGB: all automated work done, waiting for the owner's human gate (Pokémon Gold on desktop and Steam Deck, see "Phase 7: what I need from the owner"). Phase 6 APU is done except the Steam Deck audio check, which the owner consciously deferred on 2026-11-15 (phase 7's prerequisites allow this); it is bundled with phase 7's Deck test (see "Phase 6")
 **Last updated:** 2026-11-15
 
 ## Status by phase
@@ -11,7 +11,7 @@
 - [x] 4 Frontend, input, saves  (gate met; minor untested items: left stick, View/Select, see "Phase 4" below)
 - [x] 5 Pokémon Red/Blue  (gate met with owner waivers: first gym not reached, Blue not separately tested; Yellow dropped by owner decision 2026-11-15: owner has no Yellow ROM and won't use it)
 - [~] 6 APU  (gate met except the Steam Deck audio check, consciously deferred by the owner 2026-11-15; dmg_sound 10 is a documented known failure, see "Phase 6")
-- [ ] 7 CGB  (human gate game is Pokémon **Gold**; Crystal and Yellow dropped: owner has no ROMs for them, decided 2026-11-15)
+- [~] 7 CGB  (automated gate items met 2026-11-15, human gate open; human gate game is Pokémon **Gold**; Crystal and Yellow dropped: owner has no ROMs for them, decided 2026-11-15)
 - [ ] 8 Polish / accuracy
 - [ ] 9 Game Boy Advance  (added 2026-11-15 at the owner's request, after phase 8; see `docs/phases/09-gba.md`)
 
@@ -493,6 +493,38 @@ test result: ok. 7 passed; 0 failed
 $ cargo test --workspace -> every "test result" ok, 0 failed (gb-core unit 161, gb-cli acid2 7, doctor_trace 11, pokemon_local 2, mooneye 8, ...); fmt-ok; clippy clean
 ```
   Button scripts for rtc3test are in `tests/expected/rtc3test/`. The CGB reference screenshots of both tests (`*-cgb.png`) are NOT run: they need the DMG-compat palettes from the phase 8 note below (mbc3-tester cgb currently differs by 3825 pixels, colours only). Day-overflow/halt flags were already unit-tested in phase 2. Headless sanity check (not the human gate): `roms/pokemon_gold.gbc` boots in colour to the intro (Lapras/Pikachu) after 1500 frames.
+- [x] Task 9 (test records). `mooneye::cgb_compatible` (unit-tested, counterpart of `dmg_compatible`) and `tests/mooneye.rs::cgb_recorded` sweep every CGB-applicable Mooneye ROM on `Model::Cgb`; 66 passing ROMs are pinned as regression guards. `tests/cgb_sound.rs` records Blargg `cgb_sound`; 7 pinned.
+```
+$ cargo test -p gb-core --test mooneye cgb_recorded -- --nocapture
+CGB-SUMMARY: 66 passed, 13 failed
+  FAIL (timeouts, same CPU-timing ROMs that fail on DMG, see phase 2): add_sp_e_timing, call_cc_timing, call_timing, jp_cc_timing, jp_timing,
+       ld_hl_sp_e_timing, ret_cc_timing, ret_timing, reti_timing
+  FAIL: acceptance/ppu/intr_2_mode0_timing_sprites, acceptance/ppu/stat_lyc_onoff (same as DMG: sprite-dependent mode 3 / LYC-LCD-off, phase 3 scope)
+  FAIL: misc/ppu/vblank_stat_intr-C (VBlank/mode-2 STAT quirk, as on DMG)
+  FAIL: misc/bits/unused_hwio-C  (first failing register was FF55 and is fixed by gating HDMA to CGB mode; now fails at FF68 (BCPS) in DMG-compat mode; not investigated)
+  PASS includes: acceptance/timer (13), oam_dma (5), bits, interrupts, emulator-only/mbc1 (13) and mbc5 (8), boot_regs-cgb, boot_div-cgbABCDE, boot_hwio-C
+  not run: emulator-only/mbc2 (MBC2 unsupported, out of scope since phase 2)
+$ cargo test -p gb-core --test cgb_sound -- --nocapture
+01-registers .. 07-len sweep period sync: PASS (7 of 12)
+08-len ctr during power: FAIL   09-wave read while on: FAIL   10-wave trigger while on: FAIL
+11-regs after power: FAIL ("Powering off should clear NR41", Failed #4)   12-wave: FAIL ("Timer period or phase resetting is wrong", Failed #2)
+```
+  The five cgb_sound failures are the CGB audio differences listed in phase 6 as not implemented (CGB length counters/NR41 cleared on power-off, CGB wave-RAM access rules, wave timing). Audio stays the DMG model; the owner's listening check on Gold will show whether this matters. Phase 8 follow-up.
+- DMG gates in DMG mode: re-run with every commit via `cargo test --workspace` (cpu_instrs, Doctor, instr/mem_timing, Mooneye groups, dmg-acid2, dmg_sound, pokemon_local hashes all unchanged).
+- [x] Task 10: per-game-hack grep over `crates/` for "pokemon", "gold", `title ==`/`.title`: only header parsing, the CLI/frontend printing the title and test fixtures; no per-game code.
+
+### Phase 7 gate
+- [x] `cgb-acid2` matches its reference (`gb-cli --compare`, automated in `crates/gb-cli/tests/acid2.rs` with a must-fail control).
+- [x] All DMG gates still pass in DMG mode (full `cargo test --workspace` above: cpu_instrs, Doctor diffs, instr/mem_timing, Mooneye groups, dmg-acid2, dmg_sound, Pokémon Red hashes unchanged).
+- [x] Mooneye CGB-relevant ROMs recorded (66 pass / 13 fail, all failures explained above); Blargg `cgb_sound` recorded (7 of 12).
+- [ ] **Human:** Pokémon Gold plays on desktop and on the Steam Deck (new game -> first town -> first battle -> save/reload, RTC day/night), plus the Steam Deck audio check deferred from phase 6.
+- [x] No per-game hacks (grep above).
+
+### Phase 7: what I need from the owner
+1. Desktop (WSL): `cargo run -p gb-sdl --release -- roms/pokemon_gold.gbc` (the frontend now picks CGB mode from the header; saves go to `roms/pokemon_gold.gbc.sav`). Play: new game, first town, first battle, save, quit, relaunch, Continue. Does the day/night colour palette look right? Any wrong colours, glitched maps, missing text, crashes, sound problems? Send me the printed `audio:` line.
+2. Steam Deck (Game Mode, same `run.sh` setup as before, see `docs/STEAMDECK.md`): the same session, plus listen for audio (this is the deferred phase 6 check) and report `~/gb_log.txt`'s `audio:` line.
+3. Optional: record a session with `gb-sdl --record` so it can become a replay test with approved hashes (like Red).
+4. Decide whether the five `cgb_sound` failures and the AGE speed-switch failures should be fixed now or left for phase 8 (I recommend phase 8 unless Gold sounds wrong).
 
 ### Phase 7 open follow-ups (record and revisit)
 - ~~Mooneye CGB boot ROMs fail~~ **Resolved after task 7 (re-run as requested).** My earlier note was wrong about the cause: these ROMs are DMG-flagged, so `gb-cli` without `--model cgb` ran them as a DMG (the header-based default picks DMG for them) and the "FAIL" was just the DMG register values on screen. With `--model cgb`:

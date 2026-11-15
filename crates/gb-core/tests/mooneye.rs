@@ -96,3 +96,128 @@ fn misc_cgb_boot_state() {
         );
     }
 }
+
+/// Directories swept on CGB hardware (every directory that holds `.gb` ROMs directly).
+const CGB_DIRS: &[&str] = &[
+    "acceptance",
+    "acceptance/bits",
+    "acceptance/instr",
+    "acceptance/interrupts",
+    "acceptance/oam_dma",
+    "acceptance/ppu",
+    "acceptance/serial",
+    "acceptance/timer",
+    "emulator-only/mbc1",
+    "emulator-only/mbc5",
+    "misc",
+    "misc/bits",
+    "misc/ppu",
+];
+
+/// Records (not gates) how the CGB-applicable Mooneye ROMs do on `Model::Cgb`, one line per ROM
+/// (`CGB-RESULT ...`), and guards the ROMs listed in `CGB_MUST_PASS` against regressions.
+#[test]
+fn cgb_recorded() {
+    let mut all = Vec::new();
+    for dir in CGB_DIRS {
+        let path = format!("{MOONEYE}/{dir}");
+        let Some(results) = common::mooneye_sweep_on(
+            &path,
+            gb_core::Model::Cgb,
+            gb_core::mooneye::cgb_compatible,
+            BUDGET,
+        ) else {
+            return;
+        };
+        for (name, pass, text) in results {
+            println!(
+                "CGB-RESULT {dir}/{name}: {} ({text})",
+                if pass { "PASS" } else { "FAIL" }
+            );
+            all.push((format!("{dir}/{name}"), pass));
+        }
+    }
+    let passed = all.iter().filter(|(_, p)| *p).count();
+    println!(
+        "CGB-SUMMARY: {passed} passed, {} failed",
+        all.len() - passed
+    );
+    let regressed: Vec<_> = CGB_MUST_PASS
+        .iter()
+        .filter(|n| all.iter().any(|(name, pass)| name == *n && !pass))
+        .collect();
+    assert!(
+        regressed.is_empty(),
+        "CGB ROMs that passed now fail: {regressed:?}"
+    );
+}
+
+/// Every ROM that passed in the first recorded run (2026-11-15, see PROGRESS.md).
+const CGB_MUST_PASS: &[&str] = &[
+    "acceptance/call_cc_timing2.gb",
+    "acceptance/call_timing2.gb",
+    "acceptance/div_timing.gb",
+    "acceptance/ei_sequence.gb",
+    "acceptance/ei_timing.gb",
+    "acceptance/halt_ime0_ei.gb",
+    "acceptance/halt_ime0_nointr_timing.gb",
+    "acceptance/halt_ime1_timing.gb",
+    "acceptance/if_ie_registers.gb",
+    "acceptance/intr_timing.gb",
+    "acceptance/oam_dma_restart.gb",
+    "acceptance/oam_dma_start.gb",
+    "acceptance/oam_dma_timing.gb",
+    "acceptance/pop_timing.gb",
+    "acceptance/push_timing.gb",
+    "acceptance/rapid_di_ei.gb",
+    "acceptance/reti_intr_timing.gb",
+    "acceptance/rst_timing.gb",
+    "acceptance/bits/mem_oam.gb",
+    "acceptance/bits/reg_f.gb",
+    "acceptance/instr/daa.gb",
+    "acceptance/interrupts/ie_push.gb",
+    "acceptance/oam_dma/basic.gb",
+    "acceptance/oam_dma/reg_read.gb",
+    "acceptance/ppu/intr_2_0_timing.gb",
+    "acceptance/ppu/intr_2_mode0_timing.gb",
+    "acceptance/ppu/intr_2_mode3_timing.gb",
+    "acceptance/ppu/intr_2_oam_ok_timing.gb",
+    "acceptance/ppu/stat_irq_blocking.gb",
+    "acceptance/timer/div_write.gb",
+    "acceptance/timer/rapid_toggle.gb",
+    "acceptance/timer/tim00.gb",
+    "acceptance/timer/tim00_div_trigger.gb",
+    "acceptance/timer/tim01.gb",
+    "acceptance/timer/tim01_div_trigger.gb",
+    "acceptance/timer/tim10.gb",
+    "acceptance/timer/tim10_div_trigger.gb",
+    "acceptance/timer/tim11.gb",
+    "acceptance/timer/tim11_div_trigger.gb",
+    "acceptance/timer/tima_reload.gb",
+    "acceptance/timer/tima_write_reloading.gb",
+    "acceptance/timer/tma_write_reloading.gb",
+    "emulator-only/mbc1/bits_bank1.gb",
+    "emulator-only/mbc1/bits_bank2.gb",
+    "emulator-only/mbc1/bits_mode.gb",
+    "emulator-only/mbc1/bits_ramg.gb",
+    "emulator-only/mbc1/multicart_rom_8Mb.gb",
+    "emulator-only/mbc1/ram_256kb.gb",
+    "emulator-only/mbc1/ram_64kb.gb",
+    "emulator-only/mbc1/rom_16Mb.gb",
+    "emulator-only/mbc1/rom_1Mb.gb",
+    "emulator-only/mbc1/rom_2Mb.gb",
+    "emulator-only/mbc1/rom_4Mb.gb",
+    "emulator-only/mbc1/rom_512kb.gb",
+    "emulator-only/mbc1/rom_8Mb.gb",
+    "emulator-only/mbc5/rom_16Mb.gb",
+    "emulator-only/mbc5/rom_1Mb.gb",
+    "emulator-only/mbc5/rom_2Mb.gb",
+    "emulator-only/mbc5/rom_32Mb.gb",
+    "emulator-only/mbc5/rom_4Mb.gb",
+    "emulator-only/mbc5/rom_512kb.gb",
+    "emulator-only/mbc5/rom_64Mb.gb",
+    "emulator-only/mbc5/rom_8Mb.gb",
+    "misc/boot_div-cgbABCDE.gb",
+    "misc/boot_hwio-C.gb",
+    "misc/boot_regs-cgb.gb",
+];
