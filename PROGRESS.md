@@ -354,3 +354,15 @@ clippy --all-targets -D warnings: clean;  cargo fmt --all -- --check: fmt-ok
 - Focus-loss flush and hot-plug code paths are untested without real devices.
 - A crash (panic) does not flush the save; only quit, signals and the 30 s timer do.
 - Save write failures print an error and are retried at the next flush; they do not stop the game.
+
+## Phase 5 — Pokémon Red/Blue: status (2026-11-15)
+Yellow dropped from scope by owner decision (no ROM, won't use it). `roms/` holds Red and Blue.
+
+- [x] `gb_core::input_script`: text format `<frame> <buttons>` (`120 A+START`, `130 -`, `# end N`), parser + `Recorder`, unit-tested (round trip of every button mask). Frame n = n-th `run_frame` since boot; buttons are set before it runs.
+- [x] `gb-cli run --input script [--hash-at N,N] [--screenshot-at N,N --screenshot-dir DIR]`; without `--frames` it runs to the script's `# end`.
+- [x] `gb-sdl --record FILE`: logs your button changes by frame. **Recording ignores the .sav file (neither read nor written)** so it starts from a fresh boot and the headless replay is identical; your real save is never touched (checked: .sav mtime unchanged).
+- [x] `tests/pokemon_local.rs`: for each `tests/expected/local/<name>.hashes` + `<name>.input` + `roms/<name>.gb`, replays and checks hashes; SKIPs if anything is absent. No hash files exist yet (they need owner-approved screenshots).
+- [x] Boot: Red and Blue headless, 900 frames: reach the intro cutscene (Gengar vs Nidorino / Jigglypuff), which is correct boot behaviour. Screenshots viewed by me only.
+- Determinism check: same script replayed twice on Red gave identical hashes (`frame 200: 6b70ab86acc6fafa`, `frame 400: 4d2cb65c748170f7`).
+
+Next (needs the owner): record a new-game playthrough with `gb-sdl --record`.
