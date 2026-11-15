@@ -4,6 +4,9 @@ target/
 # User's own game ROMs: never commit (CLAUDE.md §10)
 roms/
 
+# Local release/packaging output
+release/
+
 # Third-party test ROMs, fetched by scripts/fetch_test_roms.sh
 tests/roms/
 
