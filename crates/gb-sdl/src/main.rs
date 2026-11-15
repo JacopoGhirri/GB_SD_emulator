@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use gb_core::{Cartridge, GameBoy, Model, SCREEN_HEIGHT, SCREEN_WIDTH};
+use gb_core::{Cartridge, GameBoy, SCREEN_HEIGHT, SCREEN_WIDTH};
 use sdl2::controller::GameController;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::pixels::{Color, PixelFormatEnum};
@@ -111,7 +111,8 @@ fn run(args: Args) -> Result<(), String> {
     let cart = Cartridge::from_bytes(rom_bytes)
         .map_err(|e| format!("cannot load {}: {e}", args.rom.display()))?;
     eprintln!("loaded {}", cart.header().title);
-    let mut gb = GameBoy::new(cart, Model::Dmg);
+    let model = GameBoy::default_model_for(&cart);
+    let mut gb = GameBoy::new(cart, model);
     // Recording needs a fresh boot (see SaveFile::disabled), so it skips saves altogether.
     let mut save = if args.record.is_some() {
         eprintln!("recording: save file ignored for this session");

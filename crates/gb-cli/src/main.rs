@@ -44,8 +44,9 @@ struct RunArgs {
     rom: PathBuf,
 
     /// Emulated hardware model.
-    #[arg(long, value_enum, default_value_t = ModelArg::Dmg)]
-    model: ModelArg,
+    /// Default: CGB for cartridges that support it, otherwise DMG.
+    #[arg(long, value_enum)]
+    model: Option<ModelArg>,
 
     /// Stop after this many video frames.
     #[arg(long, value_name = "N")]
@@ -160,7 +161,10 @@ fn run(args: &RunArgs) -> u8 {
         return EXIT_UNSUPPORTED;
     }
 
-    let mut gb = GameBoy::new(cart, args.model.into());
+    let model = args
+        .model
+        .map_or_else(|| GameBoy::default_model_for(&cart), Model::from);
+    let mut gb = GameBoy::new(cart, model);
     if args.mooneye {
         let Some(max) = args.max_instructions else {
             eprintln!("error: --mooneye needs --max-instructions as a time limit");

@@ -61,11 +61,22 @@ pub struct Bus {
     /// where LY (0xFF44) always reads 0x90 (it had no PPU) and the unused upper bits of IF
     /// read 0 instead of 1 (real hardware reads 1; normal mode does the same as hardware).
     doctor_mode: bool,
+    /// True when running in CGB mode: CGB hardware *and* a cartridge that supports CGB.
+    /// CGB hardware with a DMG-only cartridge is "DMG compatibility mode" (this stays false).
+    cgb_mode: bool,
 }
 
 impl Bus {
+    /// A DMG bus. See [`Bus::with_mode`].
     pub fn new(cartridge: Cartridge) -> Bus {
+        Bus::with_mode(cartridge, false)
+    }
+
+    /// `cgb_mode` must already combine the hardware model with the cartridge header
+    /// (see `GameBoy::new`).
+    pub fn with_mode(cartridge: Cartridge, cgb_mode: bool) -> Bus {
         Bus {
+            cgb_mode,
             cartridge,
             ppu: Ppu::new(),
             apu: Apu::new(),
@@ -84,6 +95,11 @@ impl Bus {
 
     pub fn cartridge(&self) -> &Cartridge {
         &self.cartridge
+    }
+
+    /// Whether CGB features are active (CGB hardware running a CGB-capable cartridge).
+    pub fn cgb_mode(&self) -> bool {
+        self.cgb_mode
     }
 
     pub fn cartridge_mut(&mut self) -> &mut Cartridge {

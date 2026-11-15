@@ -45,10 +45,29 @@ pub struct GameBoy {
 
 impl GameBoy {
     pub fn new(cartridge: Cartridge, model: Model) -> GameBoy {
+        // CGB mode needs both CGB hardware and a cartridge that declares CGB support
+        // (header byte 0x143 = 0x80 or 0xC0). A DMG-only cartridge in a CGB runs in
+        // "DMG compatibility mode".
+        let cgb_mode = model == Model::Cgb && cartridge.header().supports_cgb();
         GameBoy {
             model,
             cpu: Cpu::new(),
-            bus: Bus::new(cartridge),
+            bus: Bus::with_mode(cartridge, cgb_mode),
+        }
+    }
+
+    /// True when CGB features are active (see [`Bus::cgb_mode`]).
+    pub fn cgb_mode(&self) -> bool {
+        self.bus.cgb_mode()
+    }
+
+    /// The model a frontend should pick for this cartridge when the user did not choose:
+    /// CGB for cartridges that support it (they also run on DMG), otherwise DMG.
+    pub fn default_model_for(cartridge: &Cartridge) -> Model {
+        if cartridge.header().supports_cgb() {
+            Model::Cgb
+        } else {
+            Model::Dmg
         }
     }
 
@@ -174,6 +193,34 @@ mod tests {
         rom[0x100] = 0x18;
         rom[0x101] = 0xFE;
         Cartridge::from_bytes(rom).unwrap()
+    }
+
+    fn rom_with_cgb_flag(flag: u8) -> Cartridge {
+        let mut rom = vec![0u8; 0x8000];
+        rom[0x143] = flag;
+        Cartridge::from_bytes(rom).unwrap()
+    }
+
+    #[test]
+    fn cgb_mode_needs_cgb_hardware_and_a_cgb_cartridge() {
+        for (flag, model, expect) in [
+            (0x80, Model::Cgb, true),
+            (0xC0, Model::Cgb, true),
+            (0x00, Model::Cgb, false), // DMG compatibility mode
+            (0x80, Model::Dmg, false), // enhanced cartridge on DMG hardware
+            (0xC0, Model::Dmg, false),
+        ] {
+            let gb = GameBoy::new(rom_with_cgb_flag(flag), model);
+            assert_eq!(gb.cgb_mode(), expect, "flag {flag:#04X}, {model:?}");
+        }
+        assert_eq!(
+            GameBoy::default_model_for(&rom_with_cgb_flag(0x80)),
+            Model::Cgb
+        );
+        assert_eq!(
+            GameBoy::default_model_for(&rom_with_cgb_flag(0x00)),
+            Model::Dmg
+        );
     }
 
     #[test]
