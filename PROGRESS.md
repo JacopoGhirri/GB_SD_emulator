@@ -480,6 +480,19 @@ gb-cli 9 + acid2 5; gb-core unit 159; audio_determinism 1; blargg_timing 3; cpu_
 doctor_trace 11 (56.9 s); harness_smoke 2; mooneye 8; pokemon_local 2 (196 s, all hashes unchanged); save_roundtrip 5; gb-sdl 20
 clippy --all-targets -D warnings: clean;  cargo fmt: applied
 ```
+- [x] Task 8: MBC3 / RTC review against the screenshot tests that need the PPU (previously unrun, see phase 2 known issues). Two real bugs found and fixed:
+  1. `mbc3-tester` (4 MiB cart) showed F for banks 0x80-0xFF: carts over 2 MiB are "MBC30" with an 8-bit ROM bank register (RAM bank 0-7). Gold (2 MiB) is unaffected.
+  2. `rtc3test` range tests failed: the RTC normalised invalid values; hardware only carries at 59/59/23 and wraps 6/6/5-bit fields without carry (28:63:60 -> 28:63:61).
+```
+$ cargo test -p gb-cli --test acid2 -- --nocapture
+mbc3-tester (dmg): compare passed
+rtc3test basic-tests (dmg): compare passed
+rtc3test range-tests (dmg): compare passed
+rtc3test sub-second-writes (dmg): compare passed
+test result: ok. 7 passed; 0 failed
+$ cargo test --workspace -> every "test result" ok, 0 failed (gb-core unit 161, gb-cli acid2 7, doctor_trace 11, pokemon_local 2, mooneye 8, ...); fmt-ok; clippy clean
+```
+  Button scripts for rtc3test are in `tests/expected/rtc3test/`. The CGB reference screenshots of both tests (`*-cgb.png`) are NOT run: they need the DMG-compat palettes from the phase 8 note below (mbc3-tester cgb currently differs by 3825 pixels, colours only). Day-overflow/halt flags were already unit-tested in phase 2. Headless sanity check (not the human gate): `roms/pokemon_gold.gbc` boots in colour to the intro (Lapras/Pikachu) after 1500 frames.
 
 ### Phase 7 open follow-ups (record and revisit)
 - ~~Mooneye CGB boot ROMs fail~~ **Resolved after task 7 (re-run as requested).** My earlier note was wrong about the cause: these ROMs are DMG-flagged, so `gb-cli` without `--model cgb` ran them as a DMG (the header-based default picks DMG for them) and the "FAIL" was just the DMG register values on screen. With `--model cgb`:

@@ -141,3 +141,78 @@ fn cgb_acid2_comparison_detects_a_wrong_frame() {
     };
     assert!(!out.status.success());
 }
+
+/// Run a ROM from the test bundle on `model` and compare against a reference PNG. `input` is an
+/// optional button script. Returns `None` (after a SKIP line) if a file is missing.
+fn run_and_compare(
+    rom: &str,
+    reference: &str,
+    model: &str,
+    frames_or_input: Result<&str, PathBuf>,
+) -> Option<std::process::Output> {
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/roms/game-boy-test-roms-v7.0");
+    let (rom, reference) = (root.join(rom), root.join(reference));
+    if !rom.exists() || !reference.exists() {
+        println!(
+            "SKIP: {} not found. Run scripts/fetch_test_roms.sh.",
+            rom.display()
+        );
+        return None;
+    }
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_gb-cli"));
+    cmd.arg("run").arg(&rom).args(["--model", model]);
+    match frames_or_input {
+        Ok(frames) => cmd.args(["--frames", frames]),
+        Err(script) => cmd.arg("--input").arg(script),
+    };
+    cmd.arg("--compare").arg(&reference);
+    Some(cmd.output().expect("failed to run gb-cli"))
+}
+
+fn assert_compare_passes(out: Option<std::process::Output>, what: &str) {
+    let Some(out) = out else {
+        return;
+    };
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    println!("{what}: {}", text.lines().last().unwrap_or(""));
+    assert!(
+        out.status.success(),
+        "{what} differs from reference:\n{text}"
+    );
+}
+
+/// MBC3 ROM banking (the 4 MiB cartridge needs the 8-bit "MBC30" bank register).
+#[test]
+fn mbc3_tester_matches_dmg_reference() {
+    assert_compare_passes(
+        run_and_compare(
+            "mbc3-tester/mbc3-tester.gb",
+            "mbc3-tester/mbc3-tester-dmg.png",
+            "dmg",
+            Ok("600"),
+        ),
+        "mbc3-tester (dmg)",
+    );
+}
+
+/// MBC3 real-time clock behaviour (rtc3test), driven by button scripts that pick each sub-test.
+#[test]
+fn rtc3test_matches_dmg_references() {
+    let scripts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/expected/rtc3test");
+    for name in ["basic-tests", "range-tests", "sub-second-writes"] {
+        assert_compare_passes(
+            run_and_compare(
+                "rtc3test/rtc3test.gb",
+                &format!("rtc3test/rtc3test-{name}-dmg.png"),
+                "dmg",
+                Err(scripts.join(format!("{name}.input"))),
+            ),
+            &format!("rtc3test {name} (dmg)"),
+        );
+    }
+}

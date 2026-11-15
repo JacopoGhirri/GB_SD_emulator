@@ -1,7 +1,8 @@
 //! MBC3 with optional real-time clock (Pan Docs "MBC3").
 //!
 //! * 0000-1FFF: enables both cartridge RAM and the RTC registers (0x0A).
-//! * 2000-3FFF: ROM bank, 7 bits, 0 reads as 1.
+//! * 2000-3FFF: ROM bank, 7 bits, 0 reads as 1. Carts with more than 2 MiB of ROM are the
+//!   "MBC30" variant (Pokemon Crystal JP, mbc3-tester): the bank register is then 8 bits.
 //! * 4000-5FFF: 0x00-0x03 selects a RAM bank, 0x08-0x0C selects an RTC register.
 //! * 6000-7FFF: writing 0x00 then 0x01 copies the running clock into the latched registers
 //!   that the RTC reads return.
@@ -96,19 +97,24 @@ impl Rtc {
         }
     }
 
+    /// One real second. The counters do not normalise out-of-range values (rtc3test "Invalid value
+    /// tick", "Invalid rollovers", "High minutes/hours"): a register carries into the next one
+    /// only when it passes its *valid* maximum (59 / 59 / 23). The registers are 6/6/5 bits wide,
+    /// so a value past the valid maximum (60..=63, 24..=31) just counts on and wraps to 0 at the
+    /// top of the field *without* a carry.
     fn advance_second(&mut self) {
-        self.seconds += 1;
-        if self.seconds < 60 {
+        if self.seconds != 59 {
+            self.seconds = (self.seconds + 1) & 0x3F;
             return;
         }
         self.seconds = 0;
-        self.minutes += 1;
-        if self.minutes < 60 {
+        if self.minutes != 59 {
+            self.minutes = (self.minutes + 1) & 0x3F;
             return;
         }
         self.minutes = 0;
-        self.hours += 1;
-        if self.hours < 24 {
+        if self.hours != 23 {
+            self.hours = (self.hours + 1) & 0x1F;
             return;
         }
         self.hours = 0;
@@ -190,7 +196,10 @@ pub struct Mbc3 {
     rtc: Option<Rtc>,
     ram_and_rtc_enabled: bool,
     rom_bank: u8,
-    /// 0x00-0x03: RAM bank; 0x08-0x0C: RTC register.
+    /// 0x7F, or 0xFF for MBC30 (more than 128 ROM banks = 2 MiB).
+    rom_bank_mask: u8,
+    /// 0x00-0x03: RAM bank (0x00-0x07 on MBC30); 0x08-0x0C: RTC register.
+    ram_bank_limit: u8,
     select: u8,
 }
 
@@ -203,6 +212,8 @@ impl Mbc3 {
             rtc: has_rtc.then(Rtc::default),
             ram_and_rtc_enabled: false,
             rom_bank: 1,
+            rom_bank_mask: if rom_banks > 128 { 0xFF } else { 0x7F },
+            ram_bank_limit: if rom_banks > 128 { 0x07 } else { 0x03 },
             select: 0,
         }
     }
@@ -224,7 +235,7 @@ impl Mapper for Mbc3 {
         match addr {
             0x0000..=0x1FFF => self.ram_and_rtc_enabled = value & 0x0F == 0x0A,
             0x2000..=0x3FFF => {
-                let v = value & 0x7F;
+                let v = value & self.rom_bank_mask;
                 self.rom_bank = if v == 0 { 1 } else { v };
             }
             0x4000..=0x5FFF => self.select = value,
@@ -241,7 +252,9 @@ impl Mapper for Mbc3 {
             return 0xFF;
         }
         match self.select {
-            0x00..=0x03 => self.ram.read(ram_offset(self.select as usize, addr)),
+            0x00..=0x07 if self.select <= self.ram_bank_limit => {
+                self.ram.read(ram_offset(self.select as usize, addr))
+            }
             0x08..=0x0C => match &self.rtc {
                 Some(rtc) => rtc.latched[(self.select - 0x08) as usize],
                 None => 0xFF,
@@ -255,7 +268,7 @@ impl Mapper for Mbc3 {
             return;
         }
         match self.select {
-            0x00..=0x03 => self
+            0x00..=0x07 if self.select <= self.ram_bank_limit => self
                 .ram
                 .write(ram_offset(self.select as usize, addr), value),
             0x08..=0x0C => {
@@ -364,6 +377,69 @@ mod tests {
         assert_eq!(m.read_rom(&rom, 0x4000), 0x7F);
         m.write_rom(0x2000, 0xFF); // bit 7 ignored
         assert_eq!(m.read_rom(&rom, 0x4000), 0x7F);
+    }
+
+    #[test]
+    fn rtc_does_not_normalise_invalid_values() {
+        // rtc3test "Invalid value tick": 28:63:60 -> 28:63:61, the day stays the same.
+        let mut r = Rtc {
+            hours: 28,
+            minutes: 63,
+            seconds: 60,
+            ..Rtc::default()
+        };
+        r.advance_second();
+        assert_eq!((r.days, r.hours, r.minutes, r.seconds), (0, 28, 63, 61));
+        // Past the top of the field: wraps to 0 without carrying.
+        let mut r = Rtc {
+            hours: 31,
+            minutes: 63,
+            seconds: 63,
+            ..Rtc::default()
+        };
+        r.advance_second();
+        assert_eq!((r.days, r.hours, r.minutes, r.seconds), (0, 31, 63, 0));
+        // "High minutes": minutes 60..=62 with seconds 59 -> minutes + 1, seconds 0.
+        let mut r = Rtc {
+            minutes: 61,
+            seconds: 59,
+            ..Rtc::default()
+        };
+        r.advance_second();
+        assert_eq!((r.hours, r.minutes, r.seconds), (0, 62, 0));
+        // "High hours": hours 24..=30 with 59:59 -> hours + 1.
+        let mut r = Rtc {
+            hours: 25,
+            minutes: 59,
+            seconds: 59,
+            ..Rtc::default()
+        };
+        r.advance_second();
+        assert_eq!((r.days, r.hours, r.minutes, r.seconds), (0, 26, 0, 0));
+        // Normal rollover is unchanged.
+        let mut r = Rtc {
+            hours: 23,
+            minutes: 59,
+            seconds: 59,
+            ..Rtc::default()
+        };
+        r.advance_second();
+        assert_eq!((r.days, r.hours, r.minutes, r.seconds), (1, 0, 0, 0));
+    }
+
+    #[test]
+    fn mbc30_has_an_eight_bit_rom_bank_register() {
+        let mut rom = vec![0u8; 256 * super::super::ROM_BANK_SIZE];
+        for b in 0..256 {
+            rom[b * super::super::ROM_BANK_SIZE] = b as u8;
+        }
+        let mut m = Mbc3::new(256, Ram::new(0), false, false);
+        m.write_rom(0x2000, 0xC3);
+        assert_eq!(m.read_rom(&rom, 0x4000), 0xC3);
+        m.write_rom(0x2000, 0xFF);
+        assert_eq!(m.read_rom(&rom, 0x4000), 0xFF);
+        m.write_rom(0x2000, 0);
+        assert_eq!(m.read_rom(&rom, 0x4000), 1);
     }
 
     #[test]
