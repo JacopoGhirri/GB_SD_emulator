@@ -75,5 +75,5 @@ appear there, because the script redirects stdout and stderr to it.
 
 ## 8. Still unconfirmed on the Deck
 - Left stick (not tested) and View/Select (not reported). Confirmed: D-pad, Deck A = GB A, Deck B = GB B, Menu (three lines) = Start.
-- `--fullscreen` in Game Mode (the working setup does not use it).
+- `--fullscreen` itself in Game Mode (not needed: the game already opens full screen in Game Mode without it).
 - Cause of the original instant close (section 4).
