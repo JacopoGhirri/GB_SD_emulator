@@ -405,7 +405,7 @@ Environment as before (WSL Ubuntu, rustc 1.100.0). **Automated gate items are do
 
 - [~] Blargg `dmg_sound` individual ROMs: **11 of 12 pass**. `10-wave trigger while on` fails (documented below, listed in `KNOWN_FAILING` in `tests/dmg_sound.rs`, which fails if it ever starts passing).
 - [ ] WAV dumps look/sound right: peak/RMS and pitch are checked by tests; **owner must listen** to `C:/Users/jacop/Desktop/red_title_2400frames.wav` (40 s of Pokémon Red from boot: intro and title music; made with `gb-cli run roms/pokemon_red.gb --frames 2400 --wav ...`).
-- [ ] Owner confirms Pokémon audio on desktop and Steam Deck (title theme, battle music, no crackle). Not done.
+- [~] Owner confirms Pokémon audio on desktop and Steam Deck. **Desktop (WSLg), owner-reported 2026-11-15: music sounds right; one audible hiccup on the "POKEMON RED" title screen, otherwise fine.** Printed stats of that ~69 s session: `audio: 4119 frames paced, queue fill min/avg/max 751/2139/2400 stereo frames (target 2400), 1 underruns, 0 overflows` (the one underrun matches the one hiccup; cause unknown, possibly a WSLg audio-bridge or scheduling stall, not investigated). **Steam Deck: not tested, owner cannot test now; deferred (not waived).**
 - [~] Pacing is audio-driven; the headless soak below shows a stable queue over 10 minutes. Real-device drift not verified.
 
 ```
