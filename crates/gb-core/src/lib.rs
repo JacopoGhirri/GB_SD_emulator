@@ -1,7 +1,6 @@
 //! Game Boy / Game Boy Color emulator core.
 //!
-//! Cartridge, bus, SM83 CPU, timer, DMA and (phase 3) the DMG PPU. No APU yet; audio methods
-//! return placeholder values.
+//! Cartridge, bus, SM83 CPU, timer, DMA, the DMG PPU and the APU.
 
 pub mod apu;
 pub mod bus;
@@ -148,8 +147,21 @@ impl GameBoy {
         self.bus.cartridge_mut().load_save(data);
     }
 
-    /// Append interleaved stereo f32 samples. Placeholder: appends nothing.
-    pub fn drain_audio(&mut self, _out: &mut Vec<f32>) {}
+    /// Append the interleaved stereo f32 samples (left, right, left, ...) produced since the
+    /// last call, at the rate set by [`GameBoy::set_sample_rate`] (default 48000 Hz).
+    pub fn drain_audio(&mut self, out: &mut Vec<f32>) {
+        self.bus.apu_mut().drain_audio(out);
+    }
+
+    /// Output sample rate of [`GameBoy::drain_audio`]. Does not affect emulation.
+    pub fn set_sample_rate(&mut self, rate: u32) {
+        self.bus.apu_mut().set_sample_rate(rate);
+    }
+
+    /// Mute channels for debugging: bit 0 = channel 1 ... bit 3 = channel 4.
+    pub fn set_muted_channels(&mut self, mask: u8) {
+        self.bus.apu_mut().set_muted_channels(mask);
+    }
 }
 
 #[cfg(test)]

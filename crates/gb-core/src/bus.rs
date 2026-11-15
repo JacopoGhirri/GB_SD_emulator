@@ -101,6 +101,7 @@ impl Bus {
         if self.timer.tick() {
             self.request_interrupt(Interrupt::Timer);
         }
+        self.apu.tick(self.timer.counter());
         self.cartridge.tick();
         if self.serial.tick() {
             self.request_interrupt(Interrupt::Serial);
@@ -220,7 +221,11 @@ impl Bus {
     fn write_io(&mut self, addr: u16, value: u8) {
         match addr {
             REG_IF => self.interrupts.write_flag(value),
-            REG_DIV..=REG_TAC => self.timer.write(addr, value),
+            REG_DIV..=REG_TAC => {
+                self.timer.write(addr, value);
+                // A DIV write resets the counter, which can be a falling edge for the APU.
+                self.apu.clock_div(self.timer.counter());
+            }
             io::REG_NR10..=io::REG_NR52 | io::WAVE_RAM_START..=io::WAVE_RAM_END => {
                 self.apu.write(addr, value)
             }
@@ -257,6 +262,10 @@ impl Bus {
 
     pub fn ppu(&self) -> &Ppu {
         &self.ppu
+    }
+
+    pub fn apu_mut(&mut self) -> &mut Apu {
+        &mut self.apu
     }
 
     pub fn ppu_mut(&mut self) -> &mut Ppu {

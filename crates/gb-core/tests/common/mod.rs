@@ -193,7 +193,7 @@ pub fn run_blargg_ram(relative: &str, max_instructions: u64) -> Option<(u8, Stri
         }
     }
     let b = gb.bus();
-    let text: Vec<u8> = (0xA004u16..0xA104)
+    let text: Vec<u8> = (0xA004u16..0xA404)
         .map(|a| b.peek(a))
         .take_while(|&c| c != 0)
         .collect();

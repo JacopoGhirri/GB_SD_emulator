@@ -93,6 +93,11 @@ impl Timer {
         interrupt
     }
 
+    /// The 16-bit system counter (DIV is its upper byte). The APU frame sequencer watches bit 12.
+    pub fn counter(&self) -> u16 {
+        self.counter
+    }
+
     pub fn read(&self, addr: u16) -> u8 {
         match addr {
             REG_DIV => (self.counter >> 8) as u8,
