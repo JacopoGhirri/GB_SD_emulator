@@ -74,11 +74,11 @@ Read `/home/deck/gb_log.txt` (it is overwritten at every launch). Errors such as
 appear there, because the script redirects stdout and stderr to it.
 
 ## 8. Still unconfirmed on the Deck
-- Left stick (not tested) and View/Select (not reported). Confirmed: D-pad, Deck A = GB A, Deck B = GB B, Menu (three lines) = Start.
+- Nothing important. Confirmed: D-pad, left stick (2026-11-16), View = Select (2026-11-16), Deck A = GB A, Deck B = GB B, Menu (three lines) = Start.
 - `--fullscreen` itself in Game Mode (not needed: the game already opens full screen in Game Mode without it).
 - Cause of the original instant close (section 4).
 
-## 9. Sound (phase 6, untested on the Deck)
+## 9. Sound (phase 6; owner-confirmed fine on the Deck 2026-11-16 with Pokémon Gold, 16 underruns in ~9.6 min, not audible)
 - `gb-sdl` opens the default SDL audio device (48 kHz stereo) and paces the game by the audio clock. If the Deck has no usable audio device it prints a warning and falls back to timer pacing.
 - Keys (Desktop Mode): `1`-`4` mute channels 1-4, `+`/`-` volume. `--no-audio` turns sound off. On exit it prints one line of queue statistics (underruns should be 0).
-- **Unconfirmed:** crackle or lag in Game Mode. If it crackles, tell me and send the "audio:" line from `~/gb_log.txt`.
+- Crackle or lag in Game Mode: none reported. If it appears, send the "audio:" line from `~/gb_log.txt`.

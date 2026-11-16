@@ -517,7 +517,7 @@ $ cargo test -p gb-core --test cgb_sound -- --nocapture
 - [x] `cgb-acid2` matches its reference (`gb-cli --compare`, automated in `crates/gb-cli/tests/acid2.rs` with a must-fail control).
 - [x] All DMG gates still pass in DMG mode (full `cargo test --workspace` above: cpu_instrs, Doctor diffs, instr/mem_timing, Mooneye groups, dmg-acid2, dmg_sound, Pokémon Red hashes unchanged).
 - [x] Mooneye CGB-relevant ROMs recorded (66 pass / 13 fail, all failures explained above); Blargg `cgb_sound` recorded (7 of 12).
-- [ ] **Human:** Pokémon Gold plays on desktop and on the Steam Deck (new game -> first town -> first battle -> save/reload, RTC day/night), plus the Steam Deck audio check deferred from phase 6.
+- [~] **Human (Deck done, desktop and some items open):** Pokémon Gold plays on desktop and on the Steam Deck (new game -> first town -> first battle -> save/reload, RTC day/night), plus the Steam Deck audio check deferred from phase 6.
 - [x] No per-game hacks (grep above).
 
 ### Phase 7: what I need from the owner
@@ -525,6 +525,17 @@ $ cargo test -p gb-core --test cgb_sound -- --nocapture
 2. Steam Deck (Game Mode, same `run.sh` setup as before, see `docs/STEAMDECK.md`): the same session, plus listen for audio (this is the deferred phase 6 check) and report `~/gb_log.txt`'s `audio:` line.
 3. Optional: record a session with `gb-sdl --record` so it can become a replay test with approved hashes (like Red).
 4. Decide whether the five `cgb_sound` failures and the AGE speed-switch failures should be fixed now or left for phase 8 (I recommend phase 8 unless Gold sounds wrong).
+
+### Phase 7: Steam Deck report (owner, 2026-11-16)
+Built in WSL (release, commit `f525a3e`), copied by USB stick, Pokémon Gold, Game Mode. Owner-reported: audio and video fine; Select (View) button works; left stick works for movement. Log (`~/gb_log.txt`):
+```
+loaded POKEMON_GLDAAUE?
+RTC advanced by 69 s of real time since the last session
+gamepad connected: Steam Deck Controller
+audio: 34261 frames paced, queue fill min/avg/max 751/2135/2400 stereo frames (target 2400), 16 underruns, 0 overflows
+```
+(The `ld.so ... gameoverlayrenderer.so ... ELFCLASS32` line is Steam's 32-bit overlay failing to preload into a 64-bit process; harmless.) 34261 frames is ~9.6 min; 16 underruns is about one per 36 s, which the owner did not find audible. The "RTC advanced by 69 s" line shows a save was reloaded and the wall-clock RTC path ran. Closes the phase 6 Deck audio check (owner: audio fine) and the phase 4 left stick / View-Select items.
+Not yet stated by the owner: desktop (WSL) Gold session, first battle, day/night palette behaviour. Asked.
 
 ### Phase 7 open follow-ups (record and revisit)
 - ~~Mooneye CGB boot ROMs fail~~ **Resolved after task 7 (re-run as requested).** My earlier note was wrong about the cause: these ROMs are DMG-flagged, so `gb-cli` without `--model cgb` ran them as a DMG (the header-based default picks DMG for them) and the "FAIL" was just the DMG register values on screen. With `--model cgb`:
