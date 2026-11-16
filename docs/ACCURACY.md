@@ -53,6 +53,23 @@ per-ROM summaries printed by the sweeps:
 
 ```
 
-## Known failures (triage is in the next section, added in task A2)
+## Known failures
 - Not in the table because the recorded tests treat them as expected (counts copied from PROGRESS.md except CGB-SUMMARY and dmg_sound 10, which the run above printed; the 13 DMG root ROMs and the AGE ROMs are not run by the script yet): 13 Mooneye ROMs on CGB (`CGB-SUMMARY: 66 passed, 13 failed`),
   6 of 12 Mooneye `acceptance/ppu` on DMG, 13 non-gated DMG `acceptance/` root ROMs, `dmg_sound` 10, `cgb_sound` 5 of 12, AGE `spsw-*` (6 ROMs).
+
+## Triage (by impact on real games)
+Impact is my judgement from what each ROM tests, not measured against a game list. Owner-played so far: Pokemon Red, Blue (DMG) and Gold (CGB): no visible problems.
+
+| Failure | Impact | Decision |
+|---|---|---|
+| Mooneye `jp/call/ret/add_sp/ld_hl_sp_e/reti` timing (9 ROMs, DMG and CGB) | Low for games, but one root cause: the order of internal-delay M-cycles versus bus accesses inside these instructions. Matters only when a game reads a timer or PPU register in the middle of such an instruction. | Left. Candidate for a later accuracy phase: one fix likely clears all 9. |
+| Mooneye `halt_ime0_*`, `di_timing-GS`, `halt_ime1_timing2-GS` (DMG) | Low: HALT/EI edge timing. | Left. |
+| Mooneye `ppu` `intr_2_mode0_timing_sprites`, `hblank_ly_scx_timing`, `lcdon_*`, `stat_lyc_onoff`, `vblank_stat_intr` | Medium in theory (mode-3 length depends on SCX and sprites; games with mid-line raster effects), none seen in the games played. Needs a pixel-FIFO PPU. | Left: deep work, owner declined (2026-11-16). |
+| `dmg_sound` 10 (wave retrigger corruption) | Very low: games do not rely on it. | Left. |
+| `cgb_sound` 08, 09, 10, 11, 12 | Low: CGB length-counter/NR41 power-off and wave-RAM access rules; Gold's audio was judged fine on desktop and Deck. | Left. |
+| AGE `speed-switch/spsw-*` (6 ROMs) | Low: exact DIV/TIMA/PPU phase across a speed switch; Gold switches speed without visible effect. | Left. |
+| Mooneye `unused_hwio-C` (fails at FF68 in DMG-compat mode) | Very low. | Left. |
+| DMG-compat palettes on CGB (`mbc3-tester-cgb`, `rtc3test-*-cgb` references not run) | Only for a DMG-only ROM forced onto `--model cgb`: the frontend and CLI choose the model from the header, so a DMG game runs in DMG mode with the normal DMG renderer. No real game is affected. | Not fixed. Real DMG palettes arrive with task B7 (selectable palettes), which is the user-visible version of this. |
+| CGB DMG-compat register values (`boot_regs-cgb` table for all titles) | Very low. | Left. |
+
+Net: no accuracy fix is justified by a game the owner plays, so task A2 makes no code change.
