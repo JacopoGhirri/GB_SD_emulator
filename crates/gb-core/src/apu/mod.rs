@@ -330,6 +330,54 @@ impl Apu {
     }
 }
 
+impl Apu {
+    /// Save-state support (see `crate::state`). Saves the hardware state and the mixer's
+    /// partial sample, but *not* the queue of finished samples (`out`): loading a state must
+    /// not replay audio that was already produced. The sample rate and mute mask belong to the
+    /// frontend and are left alone.
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        w.bytes(&self.regs);
+        w.bool(self.powered);
+        self.ch1.save_state(w);
+        self.ch2.save_state(w);
+        self.ch3.save_state(w);
+        self.ch4.save_state(w);
+        w.u8(self.fs_step);
+        w.bool(self.last_div_bit);
+        w.bool(self.double_speed);
+        w.u32(self.sample_phase);
+        w.f32(self.acc_left);
+        w.f32(self.acc_right);
+        w.u32(self.acc_count);
+        w.f32(self.cap_left);
+        w.f32(self.cap_right);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        r.bytes(&mut self.regs)?;
+        self.powered = r.bool()?;
+        self.ch1.load_state(r)?;
+        self.ch2.load_state(r)?;
+        self.ch3.load_state(r)?;
+        self.ch4.load_state(r)?;
+        self.fs_step = r.u8()? & 7;
+        self.last_div_bit = r.bool()?;
+        self.double_speed = r.bool()?;
+        // Taken modulo CPU_HZ so that a state saved at another sample rate cannot overflow.
+        self.sample_phase = r.u32()? % CPU_HZ;
+        self.acc_left = r.f32()?;
+        self.acc_right = r.f32()?;
+        self.acc_count = r.u32()?;
+        self.cap_left = r.f32()?;
+        self.cap_right = r.f32()?;
+        self.out.clear();
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

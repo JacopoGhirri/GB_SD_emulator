@@ -471,6 +471,87 @@ impl Ppu {
     }
 }
 
+impl Ppu {
+    /// Save-state support (see `crate::state`). Includes both frame buffers: a state saved
+    /// mid-frame must continue the half-drawn frame and show the same picture when loaded.
+    /// `cgb` / `cgb_hw` are fixed by the console model and checked by the caller.
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        w.bytes(&self.vram);
+        w.bytes(&self.vram1);
+        w.u8(self.vbk);
+        w.bytes(&self.bg_pal);
+        w.bytes(&self.obj_pal);
+        w.u8(self.bcps);
+        w.u8(self.ocps);
+        w.bytes(&self.oam);
+        for v in [
+            self.lcdc,
+            self.stat_enable,
+            self.scy,
+            self.scx,
+            self.ly,
+            self.lyc,
+            self.bgp,
+            self.obp0,
+            self.obp1,
+            self.wy,
+            self.wx,
+        ] {
+            w.u8(v);
+        }
+        w.u32(self.dot);
+        w.u32(self.off_dots);
+        w.bool(self.first_line_after_on);
+        w.bool(self.stat_line);
+        w.bool(self.frame_ready);
+        w.u8(self.window_line);
+        w.u32s(&self.back);
+        w.u32s(&self.framebuffer);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        use crate::state::StateError;
+        r.bytes(&mut self.vram)?;
+        r.bytes(&mut self.vram1)?;
+        self.vbk = r.u8()? & 1;
+        r.bytes(&mut self.bg_pal)?;
+        r.bytes(&mut self.obj_pal)?;
+        self.bcps = r.u8()?;
+        self.ocps = r.u8()?;
+        r.bytes(&mut self.oam)?;
+        self.lcdc = r.u8()?;
+        self.stat_enable = r.u8()?;
+        self.scy = r.u8()?;
+        self.scx = r.u8()?;
+        self.ly = r.u8()?;
+        self.lyc = r.u8()?;
+        self.bgp = r.u8()?;
+        self.obp0 = r.u8()?;
+        self.obp1 = r.u8()?;
+        self.wy = r.u8()?;
+        self.wx = r.u8()?;
+        self.dot = r.u32()?;
+        self.off_dots = r.u32()?;
+        self.first_line_after_on = r.bool()?;
+        self.stat_line = r.bool()?;
+        self.frame_ready = r.bool()?;
+        self.window_line = r.u8()?;
+        r.u32s(&mut self.back)?;
+        r.u32s(&mut self.framebuffer)?;
+        // The line/dot counters index the timing tables; reject values the PPU never has.
+        if self.ly >= LINES_PER_FRAME
+            || self.dot >= DOTS_PER_LINE
+            || self.off_dots >= DOTS_PER_FRAME
+        {
+            return Err(StateError::Corrupt("PPU position"));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

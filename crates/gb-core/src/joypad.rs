@@ -80,6 +80,23 @@ impl Joypad {
     }
 }
 
+impl Joypad {
+    /// Save-state support (see `crate::state`).
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        w.u8(self.buttons.0);
+        w.u8(self.select);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        self.buttons = Buttons(r.u8()?);
+        self.select = r.u8()? & SELECT_MASK;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -118,3 +118,30 @@ impl Noise {
         self.dac
     }
 }
+
+impl Noise {
+    /// Save-state support (see `crate::state`).
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        w.bool(self.on);
+        w.bool(self.dac);
+        w.u8(self.nr43);
+        w.u16(self.lfsr);
+        w.u32(self.timer);
+        self.len.save_state(w);
+        self.env.save_state(w);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        self.on = r.bool()?;
+        self.dac = r.bool()?;
+        self.nr43 = r.u8()?;
+        self.lfsr = r.u16()? & 0x7FFF;
+        self.timer = r.u32()? & 0x00FF_FFFF;
+        self.len.load_state(r)?;
+        self.env.load_state(r)?;
+        Ok(())
+    }
+}

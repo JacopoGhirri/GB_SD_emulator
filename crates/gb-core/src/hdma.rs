@@ -107,6 +107,29 @@ impl Hdma {
     }
 }
 
+impl Hdma {
+    /// Save-state support (see `crate::state`).
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        w.u16(self.src);
+        w.u16(self.dst);
+        w.u8(self.remaining);
+        w.bool(self.hblank_active);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        // The same masks the register writes apply, so a damaged value cannot address
+        // outside VRAM or count more blocks than HDMA5 can express.
+        self.src = r.u16()? & 0xFFF0;
+        self.dst = r.u16()? & 0x1FF0;
+        self.remaining = r.u8()? & 0x7F;
+        self.hblank_active = r.bool()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

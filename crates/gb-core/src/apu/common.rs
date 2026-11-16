@@ -86,3 +86,42 @@ impl Envelope {
 pub fn envelope_dac_on(nrx2: u8) -> bool {
     nrx2 & 0xF8 != 0
 }
+
+impl LengthCounter {
+    /// Save-state support (see `crate::state`).
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        w.u16(self.counter);
+        w.bool(self.enabled);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        self.counter = r.u16()? & 0x1FF; // at most 256 on hardware
+        self.enabled = r.bool()?;
+        Ok(())
+    }
+}
+
+impl Envelope {
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        w.u8(self.initial);
+        w.bool(self.add);
+        w.u8(self.period);
+        w.u8(self.timer);
+        w.u8(self.volume);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        self.initial = r.u8()? & 0x0F;
+        self.add = r.bool()?;
+        self.period = r.u8()? & 0x07;
+        self.timer = r.u8()? & 0x0F;
+        self.volume = r.u8()? & 0x0F;
+        Ok(())
+    }
+}

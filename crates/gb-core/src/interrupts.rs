@@ -80,6 +80,23 @@ impl Default for Interrupts {
     }
 }
 
+impl Interrupts {
+    /// Save-state support (see `crate::state`).
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        w.u8(self.enable);
+        w.u8(self.flag);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        self.enable = r.u8()?;
+        self.flag = r.u8()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -23,6 +23,7 @@
 //! timestamp is whatever the frontend set (0 by default, i.e. "unknown"); loading just remembers it.
 
 use super::{ram_offset, Mapper, Ram};
+use crate::state::{StateError, StateReader, StateWriter};
 
 const CYCLES_PER_SECOND: u32 = 1_048_576;
 const RTC_FOOTER_LEN: usize = 48;
@@ -302,6 +303,34 @@ impl Mapper for Mbc3 {
         }
     }
 
+    fn save_state(&self, w: &mut StateWriter) {
+        self.ram.save_state(w);
+        w.bool(self.ram_and_rtc_enabled);
+        w.u8(self.rom_bank);
+        w.u8(self.select);
+        w.bool(self.rtc.is_some());
+        if let Some(rtc) = &self.rtc {
+            rtc.save_state(w);
+        }
+    }
+
+    fn load_state(&mut self, r: &mut StateReader) -> Result<(), StateError> {
+        self.ram.load_state(r)?;
+        self.ram_and_rtc_enabled = r.bool()?;
+        self.rom_bank = r.u8()? & self.rom_bank_mask;
+        if self.rom_bank == 0 {
+            self.rom_bank = 1; // bank 0 is never selected in 0x4000..=0x7FFF
+        }
+        self.select = r.u8()?;
+        if r.bool()? != self.rtc.is_some() {
+            return Err(StateError::WrongMachine("cartridge (clock)"));
+        }
+        if let Some(rtc) = self.rtc.as_mut() {
+            rtc.load_state(r)?;
+        }
+        Ok(())
+    }
+
     fn save_data(&self) -> Vec<u8> {
         if !self.battery {
             return Vec::new();
@@ -328,6 +357,39 @@ impl Mapper for Mbc3 {
                 rtc.load_footer(footer);
             }
         }
+    }
+}
+
+impl Rtc {
+    fn save_state(&self, w: &mut StateWriter) {
+        w.u8(self.seconds);
+        w.u8(self.minutes);
+        w.u8(self.hours);
+        w.u16(self.days);
+        w.bool(self.halted);
+        w.bool(self.day_carry);
+        w.u32(self.sub_cycles);
+        w.bytes(&self.latched);
+        w.bool(self.latch_armed);
+        w.u64(self.timestamp);
+    }
+
+    fn load_state(&mut self, r: &mut StateReader) -> Result<(), StateError> {
+        // Field widths as on the hardware registers: advancing the clock does arithmetic on them.
+        self.seconds = r.u8()? & 0x3F;
+        self.minutes = r.u8()? & 0x3F;
+        self.hours = r.u8()? & 0x1F;
+        self.days = r.u16()? & 0x1FF;
+        self.halted = r.bool()?;
+        self.day_carry = r.bool()?;
+        self.sub_cycles = r.u32()?;
+        if self.sub_cycles >= CYCLES_PER_SECOND {
+            return Err(StateError::Corrupt("RTC sub-second counter"));
+        }
+        r.bytes(&mut self.latched)?;
+        self.latch_armed = r.bool()?;
+        self.timestamp = r.u64()?;
+        Ok(())
     }
 }
 

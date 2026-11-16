@@ -647,6 +647,33 @@ impl Default for Cpu {
 // Silence unused-import warnings until later tasks use every flag.
 const _: (u8, u8, u8, u8) = (FLAG_Z, FLAG_N, FLAG_H, FLAG_C);
 
+impl Cpu {
+    /// Save-state support (see `crate::state`).
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        self.regs.save_state(w);
+        w.bool(self.ime);
+        w.bool(self.ime_pending);
+        w.bool(self.halted);
+        w.bool(self.halt_bug);
+        w.bool(self.locked);
+        w.bool(self.last_step_ran_no_instruction);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        self.regs.load_state(r)?;
+        self.ime = r.bool()?;
+        self.ime_pending = r.bool()?;
+        self.halted = r.bool()?;
+        self.halt_bug = r.bool()?;
+        self.locked = r.bool()?;
+        self.last_step_ran_no_instruction = r.bool()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

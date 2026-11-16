@@ -77,6 +77,34 @@ fn source_address(page: u8) -> u16 {
     u16::from(page) << 8
 }
 
+impl Dma {
+    /// Save-state support (see `crate::state`).
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        w.u16(self.source);
+        w.u8(self.index);
+        w.bool(self.active);
+        w.u8(self.pending_page);
+        w.u8(self.start_in);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        self.source = r.u16()?;
+        self.index = r.u8()?;
+        self.active = r.bool()?;
+        self.pending_page = r.u8()?;
+        self.start_in = r.u8()?;
+        // `index` addresses OAM while a transfer runs, `source + index` must not overflow.
+        if self.index > OAM_DMA_LEN || (self.active && self.index >= OAM_DMA_LEN) {
+            return Err(crate::state::StateError::Corrupt("OAM DMA index"));
+        }
+        self.source &= 0xFF00;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

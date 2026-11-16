@@ -214,3 +214,46 @@ impl Square {
         self.dac
     }
 }
+
+impl Square {
+    /// Save-state support (see `crate::state`). `has_sweep` is structural (channel 1 vs 2).
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        w.bool(self.on);
+        w.bool(self.dac);
+        w.u8(self.duty);
+        w.u8(self.pos);
+        w.u32(self.timer);
+        w.u16(self.freq);
+        self.len.save_state(w);
+        self.env.save_state(w);
+        w.u8(self.sweep_period);
+        w.bool(self.sweep_negate);
+        w.u8(self.sweep_shift);
+        w.u8(self.sweep_timer);
+        w.u16(self.shadow);
+        w.bool(self.sweep_enabled);
+        w.bool(self.negate_used);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        self.on = r.bool()?;
+        self.dac = r.bool()?;
+        self.duty = r.u8()? & 3;
+        self.pos = r.u8()? & 7;
+        self.timer = r.u32()? & 0x3FFF;
+        self.freq = r.u16()? & 0x7FF;
+        self.len.load_state(r)?;
+        self.env.load_state(r)?;
+        self.sweep_period = r.u8()? & 7;
+        self.sweep_negate = r.bool()?;
+        self.sweep_shift = r.u8()? & 7;
+        self.sweep_timer = r.u8()? & 0x0F;
+        self.shadow = r.u16()? & 0x7FF;
+        self.sweep_enabled = r.bool()?;
+        self.negate_used = r.bool()?;
+        Ok(())
+    }
+}

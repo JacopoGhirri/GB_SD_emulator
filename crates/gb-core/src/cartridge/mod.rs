@@ -10,6 +10,7 @@ mod mbc5;
 
 pub use header::{CartridgeType, Header};
 
+use crate::state::{StateError, StateReader, StateWriter};
 use std::fmt;
 
 /// Size of the header region. Everything the header needs lives below 0x0150.
@@ -79,6 +80,12 @@ pub trait Mapper: fmt::Debug {
         None
     }
     fn advance_rtc_seconds(&mut self, _secs: u64) {}
+    /// Save-state support (see `crate::state`): bank registers, RAM contents and any clock.
+    /// The ROM image is not part of a state.
+    fn save_state(&self, _w: &mut StateWriter) {}
+    fn load_state(&mut self, _r: &mut StateReader) -> Result<(), StateError> {
+        Ok(())
+    }
 }
 
 /// Cartridge RAM. An absent RAM reads 0xFF; offsets wrap inside the actual size, which is how
@@ -116,6 +123,19 @@ impl Ram {
 
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.data
+    }
+
+    pub(crate) fn save_state(&self, w: &mut StateWriter) {
+        w.u32(self.data.len() as u32);
+        w.bytes(&self.data);
+    }
+
+    /// The RAM size is fixed by the header, so a state with another size is not for this cartridge.
+    pub(crate) fn load_state(&mut self, r: &mut StateReader) -> Result<(), StateError> {
+        if r.u32()? as usize != self.data.len() {
+            return Err(StateError::WrongMachine("cartridge (RAM size)"));
+        }
+        r.bytes(&mut self.data)
     }
 
     /// Copy as much of `saved` as fits; a short or long save file never panics.
@@ -240,5 +260,12 @@ impl Cartridge {
     /// Advance the RTC by real elapsed seconds. Frontend use only.
     pub fn advance_rtc_seconds(&mut self, secs: u64) {
         self.mapper.advance_rtc_seconds(secs);
+    }
+    /// Mapper registers, cartridge RAM and RTC for a save state (not the ROM).
+    pub fn save_state(&self, w: &mut StateWriter) {
+        self.mapper.save_state(w);
+    }
+    pub fn load_state(&mut self, r: &mut StateReader) -> Result<(), StateError> {
+        self.mapper.load_state(r)
     }
 }

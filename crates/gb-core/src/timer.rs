@@ -160,6 +160,31 @@ impl Default for Timer {
     }
 }
 
+impl Timer {
+    /// Save-state support (see `crate::state`).
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        w.u16(self.counter);
+        w.u8(self.tima);
+        w.u8(self.tma);
+        w.u8(self.tac);
+        w.bool(self.reload_pending);
+        w.bool(self.reloading);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        self.counter = r.u16()?;
+        self.tima = r.u8()?;
+        self.tma = r.u8()?;
+        self.tac = r.u8()?;
+        self.reload_pending = r.bool()?;
+        self.reloading = r.bool()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

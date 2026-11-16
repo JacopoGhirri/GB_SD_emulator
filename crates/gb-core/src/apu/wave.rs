@@ -160,3 +160,36 @@ impl Wave {
         self.dac
     }
 }
+
+impl Wave {
+    /// Save-state support (see `crate::state`). Includes wave RAM.
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        w.bool(self.on);
+        w.bool(self.dac);
+        w.u8(self.volume_code);
+        w.u16(self.freq);
+        w.u32(self.timer);
+        w.u8(self.pos);
+        w.u8(self.sample);
+        w.u8(self.since_fetch);
+        self.len.save_state(w);
+        w.bytes(&self.ram);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        self.on = r.bool()?;
+        self.dac = r.bool()?;
+        self.volume_code = r.u8()? & 3;
+        self.freq = r.u16()? & 0x7FF;
+        self.timer = r.u32()? & 0x3FFF;
+        self.pos = r.u8()? & 31;
+        self.sample = r.u8()? & 0x0F;
+        self.since_fetch = r.u8()?;
+        self.len.load_state(r)?;
+        r.bytes(&mut self.ram)?;
+        Ok(())
+    }
+}

@@ -122,6 +122,36 @@ impl Registers {
     }
 }
 
+impl Registers {
+    /// Save-state support (see `crate::state`).
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        for v in [
+            self.a, self.f, self.b, self.c, self.d, self.e, self.h, self.l,
+        ] {
+            w.u8(v);
+        }
+        w.u16(self.sp);
+        w.u16(self.pc);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        self.a = r.u8()?;
+        self.f = r.u8()? & 0xF0; // the low nibble of F does not exist
+        self.b = r.u8()?;
+        self.c = r.u8()?;
+        self.d = r.u8()?;
+        self.e = r.u8()?;
+        self.h = r.u8()?;
+        self.l = r.u8()?;
+        self.sp = r.u16()?;
+        self.pc = r.u16()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

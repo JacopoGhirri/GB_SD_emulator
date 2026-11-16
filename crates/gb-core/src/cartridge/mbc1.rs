@@ -10,6 +10,7 @@
 //!   Bank numbers wrap to the real ROM size.
 
 use super::{ram_offset, Mapper, Ram, ROM_BANK_SIZE};
+use crate::state::{StateError, StateReader, StateWriter};
 
 #[derive(Debug)]
 pub struct Mbc1 {
@@ -109,6 +110,24 @@ impl Mapper for Mbc1 {
             let bank = if self.mode1 { self.bank2 as usize } else { 0 };
             self.ram.write(ram_offset(bank, addr), value);
         }
+    }
+
+    fn save_state(&self, w: &mut StateWriter) {
+        self.ram.save_state(w);
+        w.bool(self.ram_enabled);
+        w.u8(self.bank1);
+        w.u8(self.bank2);
+        w.bool(self.mode1);
+    }
+
+    fn load_state(&mut self, r: &mut StateReader) -> Result<(), StateError> {
+        self.ram.load_state(r)?;
+        self.ram_enabled = r.bool()?;
+        // Same widths the register writes keep (BANK1 5 bits, BANK2 2 bits).
+        self.bank1 = r.u8()? & 0x1F;
+        self.bank2 = r.u8()? & 0x03;
+        self.mode1 = r.bool()?;
+        Ok(())
     }
 
     fn save_data(&self) -> Vec<u8> {

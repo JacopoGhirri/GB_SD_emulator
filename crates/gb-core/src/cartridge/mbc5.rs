@@ -6,6 +6,7 @@
 //!   Unlike MBC1, bank 0 can be selected for 4000-7FFF, and 0000-3FFF is always bank 0.
 
 use super::{ram_offset, Mapper, Ram, ROM_BANK_SIZE};
+use crate::state::{StateError, StateReader, StateWriter};
 
 #[derive(Debug)]
 pub struct Mbc5 {
@@ -67,6 +68,21 @@ impl Mapper for Mbc5 {
             self.ram
                 .write(ram_offset(self.ram_bank as usize, addr), value);
         }
+    }
+
+    fn save_state(&self, w: &mut StateWriter) {
+        self.ram.save_state(w);
+        w.bool(self.ram_enabled);
+        w.u16(self.rom_bank);
+        w.u8(self.ram_bank);
+    }
+
+    fn load_state(&mut self, r: &mut StateReader) -> Result<(), StateError> {
+        self.ram.load_state(r)?;
+        self.ram_enabled = r.bool()?;
+        self.rom_bank = r.u16()? & 0x1FF;
+        self.ram_bank = r.u8()?;
+        Ok(())
     }
 
     fn save_data(&self) -> Vec<u8> {

@@ -189,6 +189,18 @@ impl Bus {
         }
     }
 
+    /// True while an OAM DMA transfer owns the bus (the save-state tests use this to save in
+    /// the middle of one).
+    pub fn oam_dma_active(&self) -> bool {
+        self.dma.is_active()
+    }
+
+    /// True while a VRAM DMA is in progress: an HBlank transfer with blocks left, or the CPU
+    /// still stalled by a block.
+    pub fn vram_dma_active(&self) -> bool {
+        self.hdma.hblank_active() || self.hdma_stall > 0
+    }
+
     /// Whether CGB features are active (CGB hardware running a CGB-capable cartridge).
     pub fn cgb_mode(&self) -> bool {
         self.cgb_mode
@@ -507,6 +519,58 @@ impl Bus {
     /// Raise an interrupt request. Used by timer, PPU, serial, joypad.
     pub fn request_interrupt(&mut self, which: Interrupt) {
         self.interrupts.request(which);
+    }
+}
+
+impl Bus {
+    /// Save-state support (see `crate::state`). `cgb_mode`, `cgb_hw` and `doctor_mode` are
+    /// fixed when the console is built (`GameBoy::load_state` checks the model), not state.
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        self.cartridge.save_state(w);
+        self.ppu.save_state(w);
+        self.apu.save_state(w);
+        w.bytes(&self.wram);
+        w.u8(self.svbk);
+        w.bytes(&self.hram);
+        w.bytes(&self.io);
+        self.interrupts.save_state(w);
+        w.u64(self.cycles);
+        self.timer.save_state(w);
+        self.dma.save_state(w);
+        self.joypad.save_state(w);
+        self.serial.save_state(w);
+        w.bool(self.double_speed);
+        w.bool(self.key1_armed);
+        w.bool(self.slow_phase);
+        self.hdma.save_state(w);
+        // Always 0 between CPU accesses (`tick` drains it before returning), so no test can
+        // catch a mistake here; saved anyway so the format stays complete if that ever changes.
+        w.u32(self.hdma_stall);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        self.cartridge.load_state(r)?;
+        self.ppu.load_state(r)?;
+        self.apu.load_state(r)?;
+        r.bytes(&mut self.wram)?;
+        self.svbk = r.u8()? & 7;
+        r.bytes(&mut self.hram)?;
+        r.bytes(&mut self.io)?;
+        self.interrupts.load_state(r)?;
+        self.cycles = r.u64()?;
+        self.timer.load_state(r)?;
+        self.dma.load_state(r)?;
+        self.joypad.load_state(r)?;
+        self.serial.load_state(r)?;
+        self.double_speed = r.bool()?;
+        self.key1_armed = r.bool()?;
+        self.slow_phase = r.bool()?;
+        self.hdma.load_state(r)?;
+        self.hdma_stall = r.u32()?;
+        Ok(())
     }
 }
 

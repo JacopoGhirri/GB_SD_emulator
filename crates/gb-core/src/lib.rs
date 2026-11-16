@@ -15,6 +15,7 @@ pub mod joypad;
 pub mod mooneye;
 pub mod ppu;
 pub mod serial;
+pub mod state;
 pub mod timer;
 
 pub use bus::Bus;
@@ -29,6 +30,7 @@ pub enum Model {
 }
 
 pub use joypad::Buttons;
+pub use state::StateError;
 
 /// Width and height of the LCD in pixels.
 pub const SCREEN_WIDTH: usize = 160;
@@ -181,6 +183,106 @@ impl GameBoy {
     /// Mute channels for debugging: bit 0 = channel 1 ... bit 3 = channel 4.
     pub fn set_muted_channels(&mut self, mask: u8) {
         self.bus.apu_mut().set_muted_channels(mask);
+    }
+}
+
+/// Magic bytes at the start of every save state.
+const STATE_MAGIC: [u8; 4] = *b"GBST";
+/// Bump when the layout of any component's `save_state` changes. Old states are rejected, not
+/// guessed at.
+const STATE_VERSION: u32 = 1;
+/// magic + version + model + cgb_mode + cartridge id + payload length + payload checksum.
+const STATE_HEADER_LEN: usize = 4 + 4 + 1 + 1 + 8 + 4 + 8;
+
+impl GameBoy {
+    /// Identifies the cartridge a state belongs to: a hash of header bytes 0x134..0x150 (title,
+    /// type, ROM/RAM size, version, header and global checksums). Hashing the whole ROM on every
+    /// save (rewind saves often) would be slow; the global checksum already covers its content.
+    fn cartridge_id(&self) -> u64 {
+        let rom = self.bus.cartridge().rom();
+        state::checksum(rom.get(0x134..0x150).unwrap_or(&[]))
+    }
+
+    /// Serialise the whole machine: CPU, memories, PPU, APU, timers, DMA, mapper and RTC, plus
+    /// both frame buffers. Not included: the ROM, the audio output queue, the serial log and the
+    /// frontend's audio settings. Deterministic: the same machine always gives the same bytes.
+    pub fn save_state(&self) -> Vec<u8> {
+        let mut payload = state::StateWriter::new();
+        self.cpu.save_state(&mut payload);
+        self.bus.save_state(&mut payload);
+        let payload = payload.into_bytes();
+
+        let mut out = state::StateWriter::new();
+        out.bytes(&STATE_MAGIC);
+        out.u32(STATE_VERSION);
+        out.u8(u8::from(self.model == Model::Cgb));
+        out.bool(self.bus.cgb_mode());
+        out.u64(self.cartridge_id());
+        out.u32(payload.len() as u32);
+        out.u64(state::checksum(&payload));
+        out.bytes(&payload);
+        out.into_bytes()
+    }
+
+    /// Restore a state made by [`GameBoy::save_state`] for the same cartridge and console model.
+    /// Never panics on bad input. If it returns an error the machine is left exactly as it was
+    /// before the call (a backup is restored), so a bad file cannot wreck a running game.
+    pub fn load_state(&mut self, data: &[u8]) -> Result<(), StateError> {
+        let mut r = state::StateReader::new(data);
+        let mut magic = [0u8; 4];
+        r.bytes(&mut magic)?;
+        if magic != STATE_MAGIC {
+            return Err(StateError::BadMagic);
+        }
+        let version = r.u32()?;
+        if version != STATE_VERSION {
+            return Err(StateError::UnsupportedVersion(version));
+        }
+        if (r.u8()? == 1) != (self.model == Model::Cgb) {
+            return Err(StateError::WrongMachine("console model"));
+        }
+        if r.bool()? != self.bus.cgb_mode() {
+            return Err(StateError::WrongMachine(
+                "console mode (CGB or DMG compatibility)",
+            ));
+        }
+        if r.u64()? != self.cartridge_id() {
+            return Err(StateError::WrongMachine("cartridge"));
+        }
+        let len = r.u32()? as usize;
+        let expected = r.u64()?;
+        if r.remaining() != len {
+            return Err(StateError::Truncated);
+        }
+        let payload = &data[STATE_HEADER_LEN..];
+        if state::checksum(payload) != expected {
+            return Err(StateError::Checksum);
+        }
+
+        // A checksum-valid payload is still parsed field by field and can be rejected (wrong
+        // sizes, impossible values). Keep a backup so that failure leaves the machine intact.
+        let backup = self.save_state();
+        let mut r = state::StateReader::new(payload);
+        let result = self
+            .cpu
+            .load_state(&mut r)
+            .and_then(|()| self.bus.load_state(&mut r))
+            .and_then(|()| {
+                if r.remaining() == 0 {
+                    Ok(())
+                } else {
+                    Err(StateError::Corrupt("trailing bytes"))
+                }
+            });
+        if result.is_err() {
+            let mut r = state::StateReader::new(&backup[STATE_HEADER_LEN..]);
+            // Our own output always parses; ignoring the result cannot hide a failure that matters.
+            let _ = self
+                .cpu
+                .load_state(&mut r)
+                .and_then(|()| self.bus.load_state(&mut r));
+        }
+        result
     }
 }
 

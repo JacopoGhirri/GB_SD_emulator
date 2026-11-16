@@ -87,6 +87,27 @@ impl Default for Serial {
     }
 }
 
+impl Serial {
+    /// Save-state support (see `crate::state`). The captured output log is not part of the
+    /// machine; it is cleared on load.
+    pub fn save_state(&self, w: &mut crate::state::StateWriter) {
+        w.u8(self.sb);
+        w.u8(self.sc);
+        w.u32(self.remaining);
+    }
+
+    pub fn load_state(
+        &mut self,
+        r: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::StateError> {
+        self.sb = r.u8()?;
+        self.sc = r.u8()?;
+        self.remaining = r.u32()?;
+        self.out.clear();
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
