@@ -1,6 +1,6 @@
 # PROGRESS
 
-**Current phase:** 8 Polish / accuracy is next (phase 7 gate met 2026-11-16). Phase 6 APU is done except the Steam Deck audio check, which the owner consciously deferred on 2026-11-15 (phase 7's prerequisites allow this); it is bundled with phase 7's Deck test (see "Phase 6")
+**Current phase:** 8 Polish / accuracy, IN PROGRESS (tasks 1-3 done, see "Phase 8" at the end; phase 7 gate met 2026-11-16). Phase 6 APU is done except the Steam Deck audio check, which the owner consciously deferred on 2026-11-15 (phase 7's prerequisites allow this); it is bundled with phase 7's Deck test (see "Phase 6")
 **Last updated:** 2026-11-15
 
 ## Status by phase
@@ -12,7 +12,7 @@
 - [x] 5 Pokémon Red/Blue  (gate met with owner waivers: first gym not reached, Blue not separately tested; Yellow dropped by owner decision 2026-11-15: owner has no Yellow ROM and won't use it)
 - [~] 6 APU  (gate met except the Steam Deck audio check, consciously deferred by the owner 2026-11-15; dmg_sound 10 is a documented known failure, see "Phase 6")
 - [x] 7 CGB  (gate met 2026-11-16, see "Phase 7 gate"; human gate game is Pokémon **Gold**; Crystal and Yellow dropped: owner has no ROMs for them, decided 2026-11-15)
-- [ ] 8 Polish / accuracy
+- [~] 8 Polish / accuracy  (in progress, see "Phase 8")
 - [ ] 9 Game Boy Advance  (added 2026-11-15 at the owner's request, after phase 8; see `docs/phases/09-gba.md`)
 
 ## Phase 0 gate
@@ -550,3 +550,31 @@ test result: ok. 1 passed
 - **DMG-compat register values come from one ROM's expected table** (`boot_regs-cgb`: AF=1180 BC=0000 DE=0008 HL=007C, `Registers::post_boot_cgb_compat`). The real CGB boot ROM derives B/DE/HL from a hash of the title, so other DMG-only titles may expect different values. Not modelled.
 - **AGE `speed-switch/spsw-*` ROMs fail** (6 ROMs; Fibonacci pass signature, `gb-cli --model cgb --mooneye`): all end with B..L = 00 6B 14 06 98 10, e.g. `spsw-div-cgbBCE.gb` ("TEST FAILED!" table of values on screen) after 55374 instructions. Not investigated: they check exact DIV/TIMA/mode-0/STOP-prefetch timing across the switch. Tried resetting DIV on the switch: no ROM changed, reverted. Unknown details: whether DIV is reset, the exact length of the pause, what the switch does to the PPU phase. Phase-8 accuracy follow-up.
 - Phase 8 note: AGE documents non-CGB-mode (DMG-compat on CGB) palette colours: BG `#000000 #0063C6 #7BFF31 #FFFFFF`, OBJ `#000000 #943939 #FF8484 #FFFFFF` (task 1 currently uses plain grey for DMG-compat cartridges, the DMG renderer).
+
+## Phase 8 — Polish, accuracy, packaging: status (started 2026-11-16)
+Owner decisions (2026-11-16): accuracy = scoreboard + triage only (no deep rewrites); config = hand-written `key=value` file (no new dependency); rewind included, **off by default, buffer size configurable**, keyboard R / Deck L2; fast-forward moves from Tab to keyboard F / Deck R2; no "undo rewind"; no frame blending; a hand-written uncompressed PNG writer is fine for F12 screenshots (CRC32 + Adler32, unit-test against gb-cli's `png` decoder). Save-state tests must save at awkward moments (done) and must not store audio output in the state (done).
+Plan file: `~/.claude/plans/read-claude-md-progress-md-and-radiant-chipmunk.md` (tasks 1-14).
+
+- [x] Task 1: `scripts/run_all_tests.sh` + first `docs/ACCURACY.md` (commit `df9a4cf`). Real run: 248 tests passed, 0 failed, 1 deliberate SKIP (harness_smoke).
+- [x] Task 2: triage in `docs/ACCURACY.md`; no code change justified by real games (commit `57e1779`).
+- [x] Task 3: save states (core, std only), commit `57a7935`. `GameBoy::save_state() -> Vec<u8>` / `load_state(&[u8]) -> Result<(), StateError>`, new `gb_core::state` module.
+  - Format: magic `GBST`, version 1, model, CGB-mode flag, cartridge id (hash of header bytes 0x134..0x150), payload length, FNV-1a payload checksum, payload. Contains CPU, bus, PPU (incl. both frame buffers), APU hardware state, timer, OAM DMA, VRAM DMA, serial, joypad, interrupts, mapper registers + cart RAM + RTC. Does **not** contain the ROM, the audio output queue (cleared on load), the serial log, or frontend audio settings.
+  - A failed load leaves the machine unchanged (a backup is restored). Wrong model/cartridge/version, truncation, trailing bytes and checksum errors are `Err`, never a panic.
+  - `Bus::oam_dma_active()` and `vram_dma_active()` added (used by the tests).
+  - `bus.hdma_stall` is always 0 between CPU accesses, so no test can catch a mistake in it; it is serialized anyway (comment in `bus.rs`).
+  - Tests (`crates/gb-core/tests/save_state.rs`, 17): two hand-assembled ROMs (DMG + MBC3/RTC/RAM/battery; CGB with double speed, HBlank + general VRAM DMA, bank switching) that run all four interrupt sources, HALT/EI, STAT sources, serial, sweep, window, fast timer overflow, OAM DMA and LCD off/on. Each scenario saves, loads into a console that had run elsewhere, checks the re-saved bytes are identical, then compares picture, audio, PC, cycle count and final state bytes for 150 frames. Save points: frame boundary, mid-frame at 4 instruction counts, mid OAM DMA, just after the DMA-start write, mid HBlank DMA (3 block positions), just after LCD on, KEY1 armed, double speed, RTC after 2 s. Plus a dense scan (1500 consecutive save points per program), error/truncation/bit-flip tests, a mutate-and-reseal fuzz (800 states, no panic, failed loads leave the machine unchanged) and the real-game check on Pokemon Red `run2`.
+  - Sensitivity check (mutation testing of the tests): I removed 17 fields from the loaders one at a time (dma.start_in, hdma.remaining, ppu.window_line/stat_line/first_line_after_on, apu fs_step/acc_count/cap_left, timer.reload_pending, rtc.latch_armed, bus.slow_phase/key1_armed, cpu ime_pending/halt_bug/halted, square.negate_used, serial.remaining, joypad.select, interrupts.flag, wave.since_fetch); the final test set fails for every one. The first version of the tests missed 3 (DMA start delay, window line, timer reload) and 5 more once interrupts were added, which is why the programs and scenarios grew.
+```
+$ cargo test -p gb-core --test save_state -- --skip pokemon --nocapture   (WSL, before the last test was added)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 5.27s
+$ cargo test -p gb-core --test save_state -- --nocapture                   (WSL, earlier version, 12 tests)
+Pokemon Red state at frame 45000+5000 steps: 267060 bytes
+pokemon_red.run2 via state: 3 approved hashes match after frame 45000
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 115.32s
+```
+  **Not verified (stopped at the owner's request, laptop shutdown, 2026-11-16 night):** after the last edit I did *not* see a complete `cargo test --workspace` pass. What I saw after the final edits: `cargo fmt --all` applied, `cargo clippy --workspace --all-targets -- -D warnings` clean, the 16-test run above. The 17th test (`the_test_programs_really_exercise_what_they_claim`) was added after that run and has not been run on its own; the Pokemon test was last run in the 12-test version. The full-workspace run was killed half way (it had printed Mooneye ok and was inside `pokemon_local`). Existing behaviour was not changed deliberately (only added methods and `save_state`/`load_state` impls), but treat the earlier suites as unconfirmed until re-run.
+
+### Next (resume here)
+1. Run `scripts/run_all_tests.sh` in WSL (`CARGO_TARGET_DIR=~/gb-target`), confirm 0 failed (watch for the 17th save_state test), update the `docs/ACCURACY.md` table (it now includes `save_state`). If anything fails, fix before starting task 4.
+2. Task 4: config file (`gb-sdl/src/config.rs`). Then 5 controls (pause/reset/F12 screenshot/fast-forward F + R2/slow-mo/save-state slots), 6 DMG palettes, 7 rewind (R / L2, off by default, configurable buffer), 8 packaging + STEAMDECK.md (owner must test on the Deck), 9 perf, 10-13 docs/CI/review/robustness test.
+3. Frontend notes: states are ~270 KB each, so a rewind buffer of N states costs about N x 270 KB. Windows Smart App Control blocks test executables: build and test in WSL with a login shell (`wsl bash -lc ...`) so cargo is on PATH.
