@@ -1,6 +1,6 @@
 # PROGRESS
 
-**Current phase:** 7 CGB: all automated work done, waiting for the owner's human gate (Pokémon Gold on desktop and Steam Deck, see "Phase 7: what I need from the owner"). Phase 6 APU is done except the Steam Deck audio check, which the owner consciously deferred on 2026-11-15 (phase 7's prerequisites allow this); it is bundled with phase 7's Deck test (see "Phase 6")
+**Current phase:** 8 Polish / accuracy is next (phase 7 gate met 2026-11-16). Phase 6 APU is done except the Steam Deck audio check, which the owner consciously deferred on 2026-11-15 (phase 7's prerequisites allow this); it is bundled with phase 7's Deck test (see "Phase 6")
 **Last updated:** 2026-11-15
 
 ## Status by phase
@@ -11,7 +11,7 @@
 - [x] 4 Frontend, input, saves  (gate met; minor untested items: left stick, View/Select, see "Phase 4" below)
 - [x] 5 Pokémon Red/Blue  (gate met with owner waivers: first gym not reached, Blue not separately tested; Yellow dropped by owner decision 2026-11-15: owner has no Yellow ROM and won't use it)
 - [~] 6 APU  (gate met except the Steam Deck audio check, consciously deferred by the owner 2026-11-15; dmg_sound 10 is a documented known failure, see "Phase 6")
-- [~] 7 CGB  (automated gate items met 2026-11-15, human gate open; human gate game is Pokémon **Gold**; Crystal and Yellow dropped: owner has no ROMs for them, decided 2026-11-15)
+- [x] 7 CGB  (gate met 2026-11-16, see "Phase 7 gate"; human gate game is Pokémon **Gold**; Crystal and Yellow dropped: owner has no ROMs for them, decided 2026-11-15)
 - [ ] 8 Polish / accuracy
 - [ ] 9 Game Boy Advance  (added 2026-11-15 at the owner's request, after phase 8; see `docs/phases/09-gba.md`)
 
@@ -517,7 +517,7 @@ $ cargo test -p gb-core --test cgb_sound -- --nocapture
 - [x] `cgb-acid2` matches its reference (`gb-cli --compare`, automated in `crates/gb-cli/tests/acid2.rs` with a must-fail control).
 - [x] All DMG gates still pass in DMG mode (full `cargo test --workspace` above: cpu_instrs, Doctor diffs, instr/mem_timing, Mooneye groups, dmg-acid2, dmg_sound, Pokémon Red hashes unchanged).
 - [x] Mooneye CGB-relevant ROMs recorded (66 pass / 13 fail, all failures explained above); Blargg `cgb_sound` recorded (7 of 12).
-- [~] **Human (Deck done, desktop and some items open):** Pokémon Gold plays on desktop and on the Steam Deck (new game -> first town -> first battle -> save/reload, RTC day/night), plus the Steam Deck audio check deferred from phase 6.
+- [x] **Human (owner-reported 2026-11-16, not verified by me):** Pokémon Gold plays on desktop (WSL) and on the Steam Deck (new game -> first town -> first battle -> save/reload, RTC day/night), plus the Steam Deck audio check deferred from phase 6.
 - [x] No per-game hacks (grep above).
 
 ### Phase 7: what I need from the owner
@@ -535,7 +535,7 @@ gamepad connected: Steam Deck Controller
 audio: 34261 frames paced, queue fill min/avg/max 751/2135/2400 stereo frames (target 2400), 16 underruns, 0 overflows
 ```
 (The `ld.so ... gameoverlayrenderer.so ... ELFCLASS32` line is Steam's 32-bit overlay failing to preload into a 64-bit process; harmless.) 34261 frames is ~9.6 min; 16 underruns is about one per 36 s, which the owner did not find audible. The "RTC advanced by 69 s" line shows a save was reloaded and the wall-clock RTC path ran. Closes the phase 6 Deck audio check (owner: audio fine) and the phase 4 left stick / View-Select items.
-Not yet stated by the owner: desktop (WSL) Gold session, first battle, day/night palette behaviour. Asked.
+Desktop (WSL), owner-reported 2026-11-16: Gold works, random battles fine, day/night palette works as expected. The first-gym milestone was not asked for; the gate's "new game -> first town -> first battle -> save/reload" is covered by the owner's reports (save reload on the Deck, battles on desktop).
 
 ### Phase 7 open follow-ups (record and revisit)
 - ~~Mooneye CGB boot ROMs fail~~ **Resolved after task 7 (re-run as requested).** My earlier note was wrong about the cause: these ROMs are DMG-flagged, so `gb-cli` without `--model cgb` ran them as a DMG (the header-based default picks DMG for them) and the "FAIL" was just the DMG register values on screen. With `--model cgb`:
