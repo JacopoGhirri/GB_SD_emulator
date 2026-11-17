@@ -42,6 +42,8 @@ If no ROM is present, do only the preparation tasks (1–2) and ask the human.
    (crashes, desyncs, save problems).
 
 ## Gate (definition of done)
+
+> **Status: done.** Gate evidence, owner waivers and measured results are recorded in `PROGRESS.md` (section "Phase 5"). The boxes below are the original checklist and were not ticked individually.
 - [ ] Human confirms Red (or Blue) plays from new game through the first gym with no visible glitches. (Yellow dropped by owner decision, 2026-11-15.)
 - [ ] Save → quit → relaunch → Continue verified by the human on desktop **and** Steam Deck.
 - [ ] No panics, no hangs over a long scripted soak run.

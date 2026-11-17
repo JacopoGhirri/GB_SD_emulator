@@ -1,6 +1,6 @@
 # Accuracy scoreboard
 
-Produced by `scripts/run_all_tests.sh` (run in WSL Ubuntu, rustc 1.100.0, test ROMs v7.0 present) on 2026-11-17 (after save states were added).
+Produced by `scripts/run_all_tests.sh` (run in WSL Ubuntu, rustc 1.100.0, test ROMs v7.0 present) on 2026-11-17 (final run of phase 8: robustness suite and the unit tests of the frontend added).
 A "passed" test in a *recorded* sweep (Mooneye CGB, `cgb_sound`, `dmg_sound`, `acceptance/ppu`) means the recorded
 results did not change; the per-ROM detail is under the table. SKIPPED counts tests that skipped for a missing ROM:
 the one skip here is the deliberate missing-ROM test in `harness_smoke`.
@@ -9,6 +9,7 @@ the one skip here is the deliberate missing-ROM test in `harness_smoke`.
 suite                               passed  failed ignored  SKIPPED
 unit: gb_cli                             9       0       0        0
 acid2                                    7       0       0        0
+sdl_png_writer                           7       0       0        0
 wav                                      1       0       0        0
 unit: gb_core                          164       0       0        0
 audio_determinism                        1       0       0        0
@@ -21,12 +22,12 @@ doctor_trace                            11       0       0        0
 harness_smoke                            2       0       0        1
 mooneye                                  9       0       0        0
 pokemon_local                            2       0       0        0
+robustness                               7       0       0        0
 save_roundtrip                           5       0       0        0
 save_state                              18       0       0        0
-unit: gb_sdl                            20       0       0        0
+unit: gb_sdl                            75       0       0        0
 doc-tests gb_core                        0       0       0        0
-TOTAL                                  268       0       0        1
-
+TOTAL                                  337       0       0        1
 
 per-ROM summaries printed by the sweeps:
   mem_timing

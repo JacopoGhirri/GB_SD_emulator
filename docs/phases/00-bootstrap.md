@@ -39,6 +39,8 @@ Rust toolchain installed (`rustup`), git repo initialised.
   show the last serial output, the PC, and the instruction count at stop.
 
 ## Gate (definition of done)
+
+> **Status: done.** Gate evidence, owner waivers and measured results are recorded in `PROGRESS.md` (section "Phase 0"). The boxes below are the original checklist and were not ticked individually.
 - [ ] `cargo build --workspace`, `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --workspace` all pass.
 - [ ] `scripts/fetch_test_roms.sh` has been run and the test ROM directories exist (or the human confirmed offline mode).
 - [ ] `gb-cli run <rom>` loads a ROM, prints the parsed header (title, cart type, sizes, checksum OK/bad) and exits cleanly.

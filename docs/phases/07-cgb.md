@@ -40,6 +40,8 @@ VRAM DMA (HDMA/GDMA), Speed Switch, and the CGB power-up register values.
 - Gold/Silver/Crystal rely heavily on HDMA and mid-frame effects; failures there usually point to PPU mode/STAT timing, not to CGB features.
 
 ## Gate (definition of done)
+
+> **Status: done.** Gate evidence, owner waivers and measured results are recorded in `PROGRESS.md` (section "Phase 7"). The boxes below are the original checklist and were not ticked individually.
 - [ ] `cgb-acid2` matches its reference screenshot.
 - [ ] All DMG gates from phases 1–3 still pass in DMG mode.
 - [ ] Mooneye CGB-relevant acceptance tests: record results; Blargg `cgb_sound` recorded.

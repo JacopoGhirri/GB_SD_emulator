@@ -41,6 +41,8 @@ Read Pan Docs: Audio Overview, Audio Registers, Audio Details (frame sequencer, 
 - Keep emulation deterministic: audio output must not influence emulated time except through the frontend's pacing, never inside `gb-core`.
 
 ## Gate (definition of done)
+
+> **Status: done.** Gate evidence, owner waivers and measured results are recorded in `PROGRESS.md` (section "Phase 6"). The boxes below are the original checklist and were not ticked individually.
 - [ ] Blargg `dmg_sound` individual ROMs: record pass/fail per ROM; target is all passing except documented obscure ones.
 - [ ] WAV dumps from a test ROM or homebrew sound demo visibly (waveform) and audibly correct (human listens).
 - [ ] Human confirms audio in Pokémon (title theme, battle music) sounds right and doesn't crackle on desktop and Steam Deck.

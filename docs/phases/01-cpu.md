@@ -53,6 +53,8 @@ and the Power-Up Sequence page.
 - `CB` prefix fetch is its own bus read (1 M-cycle).
 
 ## Gate (definition of done)
+
+> **Status: done.** Gate evidence, owner waivers and measured results are recorded in `PROGRESS.md` (section "Phase 1"). The boxes below are the original checklist and were not ticked individually.
 - [ ] Unit tests for ALU/flag logic pass.
 - [ ] Each of Blargg `cpu_instrs/individual/01…11` prints `Passed` via `gb-cli --serial --expect-serial Passed`.
 - [ ] Combined `cpu_instrs.gb` passes (this one needs MBC1 — if the mapper isn't ready,

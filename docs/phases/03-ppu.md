@@ -48,6 +48,8 @@ if phase 8 decides to pursue accuracy.
 - Framebuffer must hold a stable image at frame end; do not expose a half-drawn frame.
 
 ## Gate (definition of done)
+
+> **Status: done.** Gate evidence, owner waivers and measured results are recorded in `PROGRESS.md` (section "Phase 3"). The boxes below are the original checklist and were not ticked individually.
 - [ ] `dmg-acid2` output matches the reference screenshot exactly via `gb-cli --compare`.
 - [ ] Mooneye PPU tests (`acceptance/ppu/*`): record pass/fail per test; no regression elsewhere.
 - [ ] Blargg `mem_timing` etc. still pass; all earlier gates still pass.

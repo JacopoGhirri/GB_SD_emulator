@@ -47,6 +47,8 @@ and the Power-Up Sequence (initial I/O register values).
 - IF upper three bits are always 1 on read.
 
 ## Gate (definition of done)
+
+> **Status: done.** Gate evidence, owner waivers and measured results are recorded in `PROGRESS.md` (section "Phase 2"). The boxes below are the original checklist and were not ticked individually.
 - [ ] All Phase 1 tests still pass, including combined `cpu_instrs.gb` (MBC1).
 - [ ] Blargg `instr_timing` passes.
 - [ ] Blargg `mem_timing` and `mem_timing-2` pass (if they fail due to unfinished PPU/other, record exactly why).

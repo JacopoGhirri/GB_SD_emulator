@@ -21,6 +21,8 @@ tests/roms/
 *.state[1-9]
 *.ppm
 *.png
+!docs/images/
+!docs/images/*.png
 !tests/expected/
 !tests/expected/**
 
@@ -33,5 +35,5 @@ Thumbs.db
 
 # NOTE: Cargo.lock is intentionally NOT ignored. This workspace ships binaries.
 
-# BIOS dumps (GBA): never commit (CLAUDE.md section 10)
+# BIOS or boot ROM dumps: never commit (CLAUDE.md section 10)
 bios/

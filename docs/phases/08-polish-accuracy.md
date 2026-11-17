@@ -51,6 +51,6 @@ Phase 7 gate met. The human decides how deep to go on accuracy (**ask before sta
 - [ ] All CI gates green; robustness test passes.
 
 ## What's next (for the human, not the agent)
-- Game Boy Advance support is now **phase 9** (`docs/phases/09-gba.md`), added 2026-11-15. When doing the packaging and config
-  tasks here, keep them core-agnostic (the frontend will pick a core by file extension) so phase 9 does not have to redo them.
+- Phase 9 is a cleanup of dead code and documentation (`docs/phases/09-cleanup.md`). A Game Boy Advance phase that used to be planned
+  there was removed on 2026-11-17: a GBA emulator is a different project.
 - Or: use the deterministic core for ML experiments (RL agent playing Pokémon through the headless API).

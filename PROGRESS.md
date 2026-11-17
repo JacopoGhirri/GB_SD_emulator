@@ -1,7 +1,13 @@
 # PROGRESS
 
-**Current phase:** 8 Polish / accuracy, IN PROGRESS (tasks 1-3 done, see "Phase 8" at the end; phase 7 gate met 2026-11-16). Phase 6 APU is done except the Steam Deck audio check, which the owner consciously deferred on 2026-11-15 (phase 7's prerequisites allow this); it is bundled with phase 7's Deck test (see "Phase 6")
-**Last updated:** 2026-11-15
+**Current phase:** 9 Cleanup (dead code and documentation). Phase 8 is complete except for one owner check (see "Phase 8 gate" at the end). **Last updated:** 2026-11-17.
+
+## Where things stand (read this first)
+- **The Game Boy / Game Boy Color emulator is functionally finished.** Passes Blargg `cpu_instrs`/timing, the gated Mooneye suites, `dmg-acid2` and `cgb-acid2`; plays Pokémon Red, Blue and Gold with saves and RTC on desktop and the Steam Deck. What still fails, and why it does not matter for the games played, is in `docs/ACCURACY.md`.
+- **Frontend:** `gb-sdl` shows a game list (`games/` folder), keeps saves in `saves/`, supports pause, reset, slow motion, screenshots, nine save-state slots, DMG colour schemes and a config file. Rewind and fast-forward were built, did not work on the Deck, and were removed (owner decision).
+- **Out of scope (decided):** Game Boy Advance (removed 2026-11-17: a different console, so a different project), link cable, netplay, rewind, fast-forward, pixel-FIFO PPU, a debugger.
+- **Checks:** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `scripts/run_all_tests.sh` (scoreboard), `scripts/check_docs.sh` (markdown links). Build and test in WSL (Windows Smart App Control blocks test executables): `wsl bash -lc "cd /mnt/c/... && CARGO_TARGET_DIR=~/gb-target scripts/run_all_tests.sh"`.
+- **Package for the Deck:** `scripts/package_deck.sh` makes `release/gb-sdl-deck.tar.gz`; setup steps in `docs/STEAMDECK.md`.
 
 ## Status by phase
 - [x] 0 Bootstrap
@@ -12,8 +18,8 @@
 - [x] 5 Pokémon Red/Blue  (gate met with owner waivers: first gym not reached, Blue not separately tested; Yellow dropped by owner decision 2026-11-15: owner has no Yellow ROM and won't use it)
 - [~] 6 APU  (gate met except the Steam Deck audio check, consciously deferred by the owner 2026-11-15; dmg_sound 10 is a documented known failure, see "Phase 6")
 - [x] 7 CGB  (gate met 2026-11-16, see "Phase 7 gate"; human gate game is Pokémon **Gold**; Crystal and Yellow dropped: owner has no ROMs for them, decided 2026-11-15)
-- [~] 8 Polish / accuracy  (in progress, see "Phase 8")
-- [ ] 9 Game Boy Advance  (added 2026-11-15 at the owner's request, after phase 8; see `docs/phases/09-gba.md`)
+- [x] 8 Polish / accuracy  (done 2026-11-17 except one owner check on the final package, see "Phase 8 gate")
+- [~] 9 Cleanup: dead code and documentation  (replaced the Game Boy Advance phase on 2026-11-17: a GBA emulator is a different project; see `docs/phases/09-cleanup.md`)
 
 ## Phase 0 gate
 - [x] `cargo build --workspace` — passes (see scoreboard).
@@ -453,8 +459,8 @@ Wall time is 4.8 % *shorter* than nominal in both runs, with identical queue sta
 ## Scope decisions (owner, 2026-11-15)
 - Phase 7 human gate uses Pokémon **Gold** (owner has no Crystal); Yellow in colour dropped. Phase 7 and CLAUDE.md updated.
 - Steam Deck audio check from phase 6 is deferred, to be done in the same Deck session as phase 7 (see "Phase 6").
-- **New phase 9: Game Boy Advance**, a separate `gba-core` with its own gate, placed after phase 8. CLAUDE.md non-goals/stack/index updated; `bios/` gitignored; GBA references added to `docs/REFERENCES.md`. Defaults to confirm with the owner at the start of phase 9: separate crates `gba-core`/`gba-cli`, one frontend that picks the core by file extension, HLE BIOS with an optional owner-supplied BIOS dump, and the list of GBA games the owner wants working (human gate).
-- The repo-wide rule "do not start the next phase before the gate passes" still holds; phase 9 does not start before phase 8 unless the owner reorders.
+- (2026-11-15) A phase 9 for Game Boy Advance was planned here. **Removed 2026-11-17** (owner decision: a GBA emulator is a different project). Phase 9 is now the cleanup phase.
+- The repo-wide rule "do not start the next phase before the gate passes" still holds.
 
 ## Phase 7 — CGB: status (in progress, started 2026-11-15)
 Environment as before (WSL Ubuntu, rustc 1.100.0). Plan: tasks 1-10 in the approved plan; one commit per task.
@@ -638,7 +644,35 @@ $ cargo test --workspace (WSL) -> every suite ok, 0 failed (gb-core 164, save_st
 $ scripts/package_deck.sh -> release/gb-sdl-deck.tar.gz (320K)
 ```
 
+- [x] Task 9, performance (2026-11-17, WSL, AMD Ryzen 5 7520U, release build, headless with SDL dummy video/audio drivers): `gb-sdl` at 1x speed, 3000 frames (about 48 s of game time): Pokemon Red **6.0 s CPU / 48.0 s wall = about 13% of one core**, Gold (CGB) 6.9 s / 47.9 s = about 15%; 0 audio underruns. Emulation alone (`gb-cli`, no window or audio): 12000 frames in 16.7 s (Red) and 19.3 s (Gold) = about 12x real time. The dummy driver uses a software renderer, so a real GPU window does less. One change justified by the numbers: `lto = "fat"` in the release profile (Red, 6000 frames, 8.4 s -> 6.8 s, about 20% faster, measured twice). Nothing else was worth fixing. Not measured: the Deck itself (the owner can run `top` while playing; expect a bit more than here, since the Deck's cores are slower than this laptop's).
+- [x] Task 11, CI: `.github/workflows/ci.yml` now caches the build, fails if the downloaded ROM bundle or Doctor logs are missing (so ROM tests cannot all skip and look green), runs `scripts/run_all_tests.sh` (scoreboard shown in the job summary), runs `scripts/check_docs.sh`, builds the Deck package and uploads it with the full test log. **Not observed:** I cannot see GitHub from here, so the first remote run still has to be checked by the owner. The same commands pass locally in WSL.
+- [x] Task 13, robustness (`crates/gb-core/tests/robustness.rs`, 7 tests, about 6 s, fixed seeds, every loop bounded by a step count): files shorter than a header (every length 0..0x150); all 256 cartridge-type bytes (exactly the 15 supported ones are played, the rest refused); 400 random-noise ROMs; 600 damaged valid ROMs with headers that lie about ROM and RAM size, random code, random bytes flipped, random mapper register traffic; corrupt battery saves of every boundary length for every battery type; RTC footers filled with 0x00/0xFF/0x7F/0x80 and absurd elapsed times; 300 random, many truncated and 300 bit-flipped save states. **It found one real bug:** `Rtc::advance_seconds` in `mbc3.rs` added elapsed seconds with a plain `+`, which overflows (panic in a debug build, silent wrap in release) for absurd values; fixed with `saturating_add`. The frontend cannot reach it with realistic input (elapsed time is now minus a stored timestamp), but a bad save file should not be able to reach an unchecked addition. Also run on the real binaries with generated corrupt files in `/tmp` (not committed): empty, 1000-byte and 200000-byte truncated, 40 KB of noise, cartridge type 0xFF, ROM size code 0xFF, 5000 noise bytes in the middle of Pokemon Red, a header claiming 8 MB / 128 KB RAM in a 32 KB file, a 100-byte and a 1 MB garbage `.sav`: `gb-cli` and `gb-sdl` print a one-line error and exit 1 for empty, noise, type 0xFF and size 0xFF; play the others without crashing; and move a bad `.sav` aside as `.sav.bad`. No panic, no hang.
+- [x] Task 12 (audit part): `unsafe` appears nowhere in the workspace; the core uses no `std::fs/thread/time/env/net`; in non-test code the only `expect`s are two on constant 64-byte arrays (`ppu/mod.rs`), one in `font.rs` (the table has `?`) and one in `layout.rs` (an infinite iterator); every other failure path returns an error.
+- [x] Task 10, docs: `README.md` rewritten (it still said phase 0), `docs/ARCHITECTURE.md` written (timing model, components, frontend modules, how to add a mapper, save-state rules, how to add a test suite, known simplifications), screenshots in `docs/images/` (game list with made-up names, dmg-acid2 and cgb-acid2 output from this emulator; no commercial game anywhere). I chose the screenshots myself (my earlier proposal was not answered; easy to swap).
+- [x] Phase 9 changed (owner decision 2026-11-17): the Game Boy Advance phase was removed (`docs/phases/09-gba.md` deleted, CLAUDE.md goal/non-goals/stack/index/BIOS lines, REFERENCES.md section, phase 8 notes, `.gitignore` wording) and replaced by `docs/phases/09-cleanup.md`.
+
+### Phase 8 gate
+- [x] `docs/ACCURACY.md` current and script-produced (337 passed, 0 failed, 1 deliberate skip on 2026-11-17).
+- [x] Save states: round-trip determinism test (framebuffer, audio, bytes) at awkward moments, 18 tests (task 3).
+- [~] Steam Deck package: owner confirmed on 2026-11-17 that the list, controls, audio, saves and exit work (rewind and fast-forward did not and were removed). The package was rebuilt afterwards (without them, with LTO, with the cleanup below); **owner: one last launch of the newest `release/gb-sdl-deck.tar.gz` on the Deck would close this item.**
+- [x] README, ARCHITECTURE, STEAMDECK docs complete; links checked by `scripts/check_docs.sh`.
+- [~] CI: configuration updated and passing locally; first remote run not observed (see task 11). Robustness test passes.
+
+## Phase 9 — Cleanup: log (started 2026-11-17)
+- **Dead-code search.** (1) `gb-cli` and `gb-sdl` are binary crates, so rustc's dead-code lint already covers every item (clippy runs with `-D warnings`): nothing found. (2) `gb-core` is a library, where `pub` items are never reported as dead. I made every component module private (`apu bus cpu dma hdma interrupts io joypad serial timer`; kept public: `cartridge`, `ppu`, `state`, `input_script`, `mooneye`, which the frontends or tests import) and dropped the unused `Bus`/`Cpu` re-exports, then let the compiler look inside: it found exactly two dead things, **removed/narrowed**: the `INTERRUPT_MASK` re-export in `bus.rs`, and `REG_NR50`, which only the unit tests name (now `#[cfg(test)]`). (3) My first scripted search (names appearing once in the workspace) found nothing the compiler did not; names reused elsewhere hide dead items, so the compiler result is the one to trust. (4) No unused dependencies (`png`, `clap`, `sdl2` are all imported), no unused scripts, no stray files, the only `#[allow]`s are two `dead_code` on test-helper modules compiled into several test binaries (needed).
+- **Kept on purpose:** `GameBoy::cpu()` / `bus()` (used by tracing, the Mooneye check and the tests), `Header::cgb_only` and the other small accessors used only by unit tests (they document header semantics), the `REMOVED_SETTINGS` list in `config.rs` (old `config.ini` files still load).
+- **Stale documentation fixed:** `lib.rs` ("Placeholder: nothing is executed yet"), `ppu/mod.rs` ("the DMG PPU"), `pacing.rs` (still planned audio pacing), `io.rs` ("phase 6 gives them behaviour"), `registers.rs`, `render.rs` (two "out of scope for phase N" remarks), `harness_smoke.rs`, `wave.rs`, a `gb-cli` comment, the CI comment, the whole README (was phase 0), CLAUDE.md layout/API/commands. Phase files 00-07 got a status note pointing to PROGRESS.md (their checklists were never ticked box by box; the evidence is in the per-phase sections above).
+- New `scripts/check_docs.sh`: every relative markdown link must resolve (it fails on a deliberately broken link, passes on the tree); run by CI.
+- No behaviour change: the scoreboard is identical except for the new suites.
+```
+$ scripts/run_all_tests.sh (WSL, final tree) -> TOTAL 337 passed, 0 failed, 0 ignored, 1 skipped
+  (gb_core 164, cpu_instrs 12, doctor_trace 11, mooneye 9, pokemon_local 2 [approved hashes match], robustness 7, save_state 18, gb_sdl 75)
+$ cargo fmt --all -- --check -> clean;  cargo clippy --workspace --all-targets -- -D warnings -> clean
+$ scripts/check_docs.sh -> all relative markdown links resolve (18 files checked)
+$ scripts/package_deck.sh -> release/gb-sdl-deck.tar.gz (304K)
+```
+
 ### Next (resume here)
-1. (DONE 2026-11-17, 268 passed / 0 failed) Run `scripts/run_all_tests.sh` in WSL (`CARGO_TARGET_DIR=~/gb-target`), confirm 0 failed (watch for the 17th save_state test), update the `docs/ACCURACY.md` table (it now includes `save_state`). If anything fails, fix before starting task 4.
-2. (Tasks 4-6, 8, 8b done; rewind removed; the owner Deck test passed except rewind.) Next: 9 perf, 10-13 docs/CI/review/robustness test.
-3. Frontend notes: states are ~270 KB each, so a rewind buffer of N states costs about N x 270 KB. Windows Smart App Control blocks test executables: build and test in WSL with a login shell (`wsl bash -lc ...`) so cargo is on PATH.
+1. Owner: launch the newest `release/gb-sdl-deck.tar.gz` once on the Deck (item in "Phase 8 gate"), and check the first GitHub Actions run of `ci.yml` goes green.
+2. Phase 9 is done once those two are confirmed; then the project is complete. Optional later ideas: remember the last-played game across launches (one extra file), deeper accuracy work listed in `docs/ACCURACY.md`.
+3. Windows Smart App Control blocks test executables: build and test in WSL with a login shell (`wsl bash -lc ...`) so cargo is on PATH.

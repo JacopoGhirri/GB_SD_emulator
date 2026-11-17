@@ -45,6 +45,8 @@ at runtime, and the `sdl2` crate's `bundled` feature can build it if needed).
 - `.sav` must be flushed even on `SIGTERM`/window close, not only on a clean Esc.
 
 ## Gate (definition of done)
+
+> **Status: done.** Gate evidence, owner waivers and measured results are recorded in `PROGRESS.md` (section "Phase 4"). The boxes below are the original checklist and were not ticked individually.
 - [ ] `gb-sdl` runs a homebrew/test game at the correct speed, controls work with keyboard **and** a gamepad.
 - [ ] Battery save round-trip works (write → quit → relaunch → data intact), tested automatically for the mapper level and manually in the frontend.
 - [ ] Human confirmation that it runs on the Steam Deck in Game Mode with built-in controls (record in `PROGRESS.md`).

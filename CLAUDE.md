@@ -1,7 +1,6 @@
 # CLAUDE.md — Game Boy Emulator (Rust)
 
-You are a builder agent working on a Game Boy / Game Boy Color emulator written in Rust
-(a Game Boy Advance core is added in phase 9, see `docs/phases/09-gba.md`).
+You are a builder agent working on a Game Boy / Game Boy Color emulator written in Rust.
 Read this file fully before every session. Then read `PROGRESS.md` to find the current phase,
 and read that phase's file in `docs/phases/`.
 
@@ -13,25 +12,22 @@ Build an emulator that:
    The owner's games are Red and Blue (phase 5) and Gold (phase 7); Yellow was dropped, and Crystal is untested
    because the owner has no ROM for it.
 3. Runs on a Steam Deck (Linux, x86_64) with gamepad input and sound.
-4. (Phase 9, added 2026-11-15) Plays the owner's Game Boy Advance games from a separate `gba-core`,
-   with the same standards (deterministic, test-ROM driven, no per-game hacks).
 
 The human owner is an ML PhD who codes comfortably but is not a professional software engineer.
 This is a learning project: keep code readable, explain non-obvious hardware behaviour in comments,
 and prefer the simple correct design over the clever one.
 
-**Non-goals:** Game Boy Advance link cable / e-Reader and other GBA extras (see phase 9 "Out of scope"), netplay, debugger GUI, shaders,
+**Non-goals:** Game Boy Advance (a different console, so a different emulator: removed from scope 2026-11-17), link cable, netplay, rewind, fast-forward, debugger GUI, shaders,
 supporting every obscure cartridge mapper, bit-perfect accuracy for obscure edge cases
 (see phase 8 for how far accuracy goes).
 
 ## 2. Tech stack
 
 - Language: Rust (stable). Edition 2021 or later.
-- Cargo workspace with three crates (phase 9 adds `gba-core` and `gba-cli` under the same rules):
+- Cargo workspace with three crates:
   - `gb-core` — the emulator. **No dependencies** (std only). No I/O, no threads, no globals, no `unsafe`.
   - `gb-cli` — headless runner used for tests and tracing. May use `png` and `clap`.
   - `gb-sdl` — desktop/Steam Deck frontend using the `sdl2` crate (video, audio, gamepad).
-  - `gba-core` / `gba-cli` — phase 9 only; do not create them earlier.
 - Adding any other dependency requires a one-line justification in `PROGRESS.md`.
 
 ## 3. Repository layout
@@ -40,7 +36,12 @@ supporting every obscure cartridge mapper, bit-perfect accuracy for obscure edge
 Cargo.toml                 workspace
 CLAUDE.md                  this file
 PROGRESS.md                living status log (you update it)
+README.md                  what it is, how to build, run and test
+docs/ARCHITECTURE.md       how it fits together; how to add a mapper or a test suite
+docs/ACCURACY.md           test scoreboard and known failures (script-produced)
+docs/STEAMDECK.md          running it on a Steam Deck
 docs/REFERENCES.md         where to look things up
+docs/images/               README screenshots (test ROMs and made-up names only)
 docs/phases/NN-*.md        one instruction file per phase
 crates/gb-core/src/
   lib.rs                   public API (GameBoy struct)
@@ -49,8 +50,9 @@ crates/gb-core/src/
   cartridge/               header parsing + mappers (mbc1, mbc3, mbc5, ...)
   ppu/  apu/  timer.rs  joypad.rs  serial.rs  dma.rs  interrupts.rs
 crates/gb-cli/             headless runner
-crates/gb-sdl/             frontend
-scripts/                   fetch_test_roms.sh, helper scripts
+crates/gb-sdl/             frontend (game list, game loop, config, input, audio, saves)
+scripts/                   fetch_test_roms.sh, fetch_doctor_logs.sh, run_all_tests.sh (scoreboard),
+                           package_deck.sh (Steam Deck package), check_docs.sh (markdown links)
 tests/roms/                third-party test ROMs (fetched, gitignored)
 tests/expected/            reference screenshots / logs we are allowed to commit
 roms/                      user's own game ROMs. GITIGNORED. NEVER COMMIT.
@@ -66,8 +68,9 @@ gb.run_frame()                // run until a frame is complete
 gb.framebuffer() -> &[u32]    // 160*144 pixels, 0x00RRGGBB
 gb.set_buttons(Buttons)       // joypad state
 gb.take_serial() -> Vec<u8>   // bytes written via serial port (test ROMs print here)
-gb.save_ram() / gb.load_save_ram(..)
-gb.drain_audio(&mut Vec<f32>) // interleaved stereo samples (from phase 6)
+gb.save_ram() / gb.load_save_ram(..)      // battery-backed cartridge data
+gb.save_state() / gb.load_state(..)       // whole-machine snapshot (versioned, checksummed)
+gb.drain_audio(&mut Vec<f32>) // interleaved stereo samples
 ```
 Emulation is **deterministic**: same ROM + same inputs ⇒ same output. No wall-clock, no randomness
 (except where hardware is genuinely random, and then seed it fixed).
@@ -103,11 +106,15 @@ Instruction cycle counts must *emerge* from the sequence of bus accesses; `instr
 ```
 cargo build --workspace
 cargo test --workspace                       # unit tests + any ROM tests whose ROMs are present
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 scripts/fetch_test_roms.sh                   # downloads test ROMs into tests/roms/
-cargo run -p gb-cli -- run <rom> [options]   # headless (see phase 0 for options)
-cargo run -p gb-sdl --release -- <rom>       # desktop frontend
+scripts/fetch_doctor_logs.sh                 # downloads Gameboy Doctor reference traces
+scripts/run_all_tests.sh                     # cargo test + the scoreboard table (see docs/ACCURACY.md)
+scripts/check_docs.sh                        # every relative markdown link resolves
+scripts/package_deck.sh                      # builds release/gb-sdl-deck.tar.gz for the Steam Deck
+cargo run -p gb-cli -- run <rom> [options]   # headless (see `--help`)
+cargo run --release -p gb-sdl -- <rom|folder>  # desktop frontend: a ROM, or a folder with games/
 ```
 
 ## 6. Testing philosophy
@@ -164,7 +171,7 @@ When behaviour is wrong, in order:
   freely distributable test ROMs.
 - Do not copy source code from other emulators; their *behaviour* may be used as a reference.
   Check licences before reusing anything.
-- No boot ROM or GBA BIOS is bundled, downloaded or committed. The emulator initialises to the post-boot state directly (GBA: system calls are emulated in Rust; an owner-supplied BIOS dump is optional and gitignored).
+- No boot ROM is bundled, downloaded or committed. The emulator initialises to the post-boot state directly.
 
 ## 11. Phase index
 
@@ -179,7 +186,7 @@ When behaviour is wrong, in order:
 | 6 | `docs/phases/06-apu.md` | Audio | Blargg `dmg_sound` mostly pass, audio sounds right |
 | 7 | `docs/phases/07-cgb.md` | Game Boy Color | `cgb-acid2`, Pokémon Gold plays |
 | 8 | `docs/phases/08-polish-accuracy.md` | Quality, packaging, accuracy scoreboard | Documented scoreboard + Deck package |
-| 9 | `docs/phases/09-gba.md` | Game Boy Advance core (`gba-core`) | gba-tests pass, owner's GBA games play on desktop and Deck |
+| 9 | `docs/phases/09-cleanup.md` | Cleanup: dead code removed, documentation polished | Tests and scoreboard unchanged, docs checked |
 
 Keep `PROGRESS.md` pointing at the current phase.
 
