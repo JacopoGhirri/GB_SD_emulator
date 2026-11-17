@@ -606,7 +606,17 @@ $ cargo test --workspace --exclude gb-core (WSL) -> ok, 0 failed; gb-sdl 54 pass
 $ cargo clippy --workspace --all-targets -- -D warnings -> clean;  cargo fmt --all -- --check -> clean
 ```
 
+- [~] Task 8: Steam Deck package + docs. **Built and checked in WSL; waiting for the owner's Deck test (gate item).**
+  - `scripts/package_deck.sh` (run in WSL with `CARGO_TARGET_DIR=~/gb-target`) -> `release/gb-sdl-deck/` + `release/gb-sdl-deck.tar.gz` (296 KB): `gb-sdl` (stripped), `run.sh`, `config.ini` (from `crates/gb-sdl/config.example.ini`, all defaults commented), `README.txt`, `LICENSE`. The script fails if any `.gb/.gbc/.gba/.sav/.state*/.bin` file ends up in the package, and prints the `ldd` list. `run.sh`/`README.txt` live in `scripts/package/`.
+  - Checked here: the packaged binary finds `config.ini` beside itself from any working directory; runs headless with 0 underruns. A unit test (`example_config_lists_the_defaults`) uncomments every setting in the template and asserts it parses and equals the built-in defaults (keys, pad, numbers), so the shipped file cannot drift from the code.
+  - `docs/STEAMDECK.md`: package steps, corrected controls (Tab is no longer fast-forward), new section 10 (control table, config, Steam Input back-button recipe, state/rewind caveats incl. that loading a state reverts the `.sav`).
+  - **Owner to test on the Deck** (not done, I cannot): unpack the tar.gz, put a ROM name in `run.sh`, add as a Non-Steam game, then from Game Mode check (a) it launches and shows the game, (b) pad controls incl. R2 fast-forward, (c) sound, (d) a save survives quit and relaunch, (e) exit via Steam button / Exit game, (f) the same with a keyboard attached (F5/F8/P/F12), (g) optionally set `rewind = true` in `config.ini` and try L2, (h) optionally Steam Input back buttons mapped to F5/F8 as in section 10. Please report what works or fails (paste `gb_log.txt` if it does not start).
+```
+$ scripts/package_deck.sh (WSL) -> package: release/gb-sdl-deck/ ; archive: release/gb-sdl-deck.tar.gz (296K)
+$ cargo test --workspace --exclude gb-core -> ok, 0 failed; gb-sdl 55 passed;  clippy -D warnings clean; fmt clean
+```
+
 ### Next (resume here)
 1. (DONE 2026-11-17, 268 passed / 0 failed) Run `scripts/run_all_tests.sh` in WSL (`CARGO_TARGET_DIR=~/gb-target`), confirm 0 failed (watch for the 17th save_state test), update the `docs/ACCURACY.md` table (it now includes `save_state`). If anything fails, fix before starting task 4.
-2. (Tasks 4-7 done.) Next: 8 packaging + STEAMDECK.md (owner must test on the Deck), 9 perf, 10-13 docs/CI/review/robustness test.
+2. (Tasks 4-7 done, task 8 built and waiting for the owner Deck test.) Next: 9 perf, 10-13 docs/CI/review/robustness test.
 3. Frontend notes: states are ~270 KB each, so a rewind buffer of N states costs about N x 270 KB. Windows Smart App Control blocks test executables: build and test in WSL with a login shell (`wsl bash -lc ...`) so cargo is on PATH.

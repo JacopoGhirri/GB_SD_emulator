@@ -546,6 +546,77 @@ mod tests {
         );
     }
 
+    /// The shipped template (`config.example.ini`) documents every setting as a commented
+    /// default. Uncommenting all of them must parse and change nothing, so the template cannot
+    /// drift away from the real defaults.
+    #[test]
+    fn example_config_lists_the_defaults() {
+        let template = include_str!("../config.example.ini");
+        let active: String = template
+            .lines()
+            .map(|l| match l.strip_prefix("# ") {
+                Some(rest)
+                    if rest.split_once(' ').is_some_and(|(name, tail)| {
+                        !name.is_empty()
+                            && name
+                                .chars()
+                                .all(|c| c.is_ascii_lowercase() || c == '_' || c == '.')
+                            && tail.starts_with('=')
+                    }) =>
+                {
+                    rest
+                }
+                _ => l,
+            })
+            .collect::<Vec<_>>()
+            .join(
+                "
+",
+            );
+        assert!(
+            active.contains(
+                "
+scale = 4"
+            ),
+            "the uncommenting did not work"
+        );
+        let parsed = Config::parse(&active).unwrap_or_else(|e| panic!("{e:?}"));
+        let d = Config::default();
+        assert_eq!(
+            (
+                parsed.scale,
+                parsed.fullscreen,
+                parsed.swap_ab,
+                parsed.palette
+            ),
+            (d.scale, d.fullscreen, d.swap_ab, d.palette)
+        );
+        assert_eq!(
+            (
+                parsed.volume,
+                parsed.fast_forward_speed,
+                parsed.slow_mo_speed
+            ),
+            (d.volume, d.fast_forward_speed, d.slow_mo_speed)
+        );
+        assert_eq!(
+            (
+                parsed.rewind,
+                parsed.rewind_seconds,
+                parsed.rewind_interval_frames
+            ),
+            (d.rewind, d.rewind_seconds, d.rewind_interval_frames)
+        );
+        let (bp, bd) = (Bindings::new(&parsed), Bindings::new(&d));
+        assert_eq!(bp.keys, bd.keys, "key defaults in the template differ");
+        assert_eq!(bp.pads, bd.pads, "pad defaults in the template differ");
+        // Every bindable control appears in the template for keys and for the pad.
+        for (name, ..) in CONTROLS {
+            assert!(template.contains(&format!("# key.{name} =")), "key.{name}");
+            assert!(template.contains(&format!("# pad.{name} =")), "pad.{name}");
+        }
+    }
+
     #[test]
     fn extreme_numbers_are_rejected_not_clamped() {
         for bad in [
