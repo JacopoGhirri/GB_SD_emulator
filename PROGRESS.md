@@ -592,7 +592,13 @@ $ cargo test --workspace   (WSL)   -> every suite ok, 0 failed; gb-sdl 39 passed
 $ cargo clippy --workspace --all-targets -- -D warnings -> clean;  cargo fmt --all -- --check -> clean
 ```
 
+- [x] Task 6: DMG colour schemes (`crates/gb-sdl/src/palette.rs`). `palette = grey|green|pocket|mint` in the config, **F9** cycles in game (`next_palette`, rebindable). Applied in the frontend only, by swapping the core's four greys (`gb_core::ppu::SHADES`) for the scheme's colours, and only when `!gb.cgb_mode()`, so a CGB game that legitimately uses white/grey is never recoloured and the core output (acid2 references) is untouched. Screenshots (F12) use the recoloured picture. Unit tests: recolouring, pass-through of non-grey pixels, unique names, config parsing. The AGE DMG-compat-on-CGB colours noted in the phase-7 section are not part of this task (triage in ACCURACY.md found no game impact).
+```
+$ cargo test --workspace --exclude gb-core   (WSL; gb-core untouched by this commit, last full run at task 5) -> ok, 0 failed; gb-sdl 44 passed
+$ cargo clippy --workspace --all-targets -- -D warnings -> clean;  cargo fmt --all -- --check -> clean
+```
+
 ### Next (resume here)
 1. (DONE 2026-11-17, 268 passed / 0 failed) Run `scripts/run_all_tests.sh` in WSL (`CARGO_TARGET_DIR=~/gb-target`), confirm 0 failed (watch for the 17th save_state test), update the `docs/ACCURACY.md` table (it now includes `save_state`). If anything fails, fix before starting task 4.
-2. (Tasks 4 and 5 done.) Next: 6 DMG palettes, 7 rewind (R / L2, off by default, configurable buffer), 8 packaging + STEAMDECK.md (owner must test on the Deck), 9 perf, 10-13 docs/CI/review/robustness test.
+2. (Tasks 4-6 done.) Next: 7 rewind (R / L2, off by default, configurable buffer), 8 packaging + STEAMDECK.md (owner must test on the Deck), 9 perf, 10-13 docs/CI/review/robustness test.
 3. Frontend notes: states are ~270 KB each, so a rewind buffer of N states costs about N x 270 KB. Windows Smart App Control blocks test executables: build and test in WSL with a login shell (`wsl bash -lc ...`) so cargo is on PATH.

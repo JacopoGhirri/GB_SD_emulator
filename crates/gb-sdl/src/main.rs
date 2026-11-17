@@ -8,6 +8,7 @@ mod config;
 mod files;
 mod input;
 mod pacing;
+mod palette;
 mod png;
 mod save;
 mod video;
@@ -207,6 +208,9 @@ fn run(args: Args) -> Result<(), String> {
     let mut slow_mo = false;
     let mut paused = false;
     let mut slot: u8 = 1;
+    let mut palette = cfg.palette;
+    // What is on screen: the core's frame with the DMG colour scheme applied.
+    let mut shown = vec![0u32; SCREEN_WIDTH * SCREEN_HEIGHT];
     let mut notice = Notice::default();
     let mut pacer = pacing::Pacer::new();
     let mut pixels = vec![0u8; SCREEN_WIDTH * SCREEN_HEIGHT * 4];
@@ -326,15 +330,23 @@ fn run(args: Args) -> Result<(), String> {
                 }
                 (Action::Screenshot, true) => {
                     let path = files::next_screenshot_path(&args.rom);
-                    let png = png::encode_rgb(
-                        SCREEN_WIDTH as u32,
-                        SCREEN_HEIGHT as u32,
-                        gb.framebuffer(),
-                    );
+                    let png = png::encode_rgb(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32, &shown);
                     match std::fs::write(&path, png) {
                         Ok(()) => notice.show(&mut canvas, &format!("saved {}", path.display())),
                         Err(e) => notice.show(&mut canvas, &format!("screenshot failed: {e}")),
                     }
+                }
+                (Action::NextPalette, true) => {
+                    palette = palette::next(palette);
+                    let note = if gb.cgb_mode() {
+                        format!(
+                            "palette {} (applies to DMG games only)",
+                            palette::name(palette)
+                        )
+                    } else {
+                        format!("palette {}", palette::name(palette))
+                    };
+                    notice.show(&mut canvas, &note);
                 }
                 (Action::NextSlot, true) => {
                     slot = files::next_slot(slot);
@@ -362,12 +374,13 @@ fn run(args: Args) -> Result<(), String> {
             frame_count += 1;
         }
 
-        for (dst, px) in pixels
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .zip(gb.framebuffer())
-        {
+        // The scheme only recolours DMG output; CGB games already carry their own colours.
+        if gb.cgb_mode() {
+            shown.copy_from_slice(gb.framebuffer());
+        } else {
+            palette::apply(palette, gb.framebuffer(), &mut shown);
+        }
+        for (dst, px) in pixels.as_chunks_mut::<4>().0.iter_mut().zip(&shown) {
             *dst = px.to_le_bytes(); // ARGB8888 little-endian: B, G, R, A
         }
         texture

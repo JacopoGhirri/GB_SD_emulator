@@ -12,17 +12,19 @@
 //! volume = 0.8                # 0.0 - 1.0
 //! fast_forward_speed = 0      # 0 = as fast as possible, otherwise a multiple (2 = double speed)
 //! slow_mo_speed = 0.25        # while the slow-motion key is held
+//! palette = grey              # DMG colours: grey green pocket mint (F9 cycles in game)
 //! key.fast_forward = F, Tab   # keyboard: comma-separated SDL key names
 //! pad.fast_forward = righttrigger
 //! ```
 //! Bindable names: `right left up down a b start select quit fullscreen fast_forward slow_mo
-//! pause reset screenshot save_state load_state next_slot`.
+//! pause reset screenshot save_state load_state next_slot next_palette`.
 //! A `key.NAME` / `pad.NAME` line *replaces* that control's default bindings.
 //! Pad names are SDL's: `a b x y back start leftshoulder rightshoulder dpup dpdown dpleft
 //! dpright leftstick rightstick lefttrigger righttrigger`.
 
 use std::path::{Path, PathBuf};
 
+use crate::palette;
 use gb_core::Buttons;
 use sdl2::controller::{Axis, Button};
 use sdl2::keyboard::Keycode;
@@ -45,6 +47,8 @@ pub enum Action {
     LoadState,
     /// Cycle the current slot 1..=9.
     NextSlot,
+    /// Cycle the DMG colour scheme.
+    NextPalette,
 }
 
 /// What a key or pad input does.
@@ -138,6 +142,12 @@ const CONTROLS: &[ControlRow] = &[
         &[],
     ),
     ("next_slot", Target::Action(Action::NextSlot), &["F6"], &[]),
+    (
+        "next_palette",
+        Target::Action(Action::NextPalette),
+        &["F9"],
+        &[],
+    ),
 ];
 
 #[derive(Clone, Debug)]
@@ -150,6 +160,8 @@ pub struct Config {
     pub fast_forward_speed: f64,
     /// Multiple of normal speed while slow-motion is held (0.1 to 1).
     pub slow_mo_speed: f64,
+    /// Index into `palette::PALETTES` (DMG colour scheme).
+    pub palette: usize,
     pub(crate) key_overrides: Vec<(&'static str, Vec<Keycode>)>,
     pub(crate) pad_overrides: Vec<(&'static str, Vec<PadInput>)>,
 }
@@ -163,6 +175,7 @@ impl Default for Config {
             volume: 1.0,
             fast_forward_speed: 0.0,
             slow_mo_speed: 0.25,
+            palette: 0,
             key_overrides: Vec::new(),
             pad_overrides: Vec::new(),
         }
@@ -226,6 +239,12 @@ impl Config {
                     .ok()
                     .filter(|v| *v == 0.0 || (1.0..=100.0).contains(v))
                     .ok_or("fast_forward_speed must be 0 (uncapped) or from 1 to 100")?;
+            }
+            "palette" => {
+                self.palette = palette::by_name(value).ok_or_else(|| {
+                    let names: Vec<&str> = palette::PALETTES.iter().map(|p| p.0).collect();
+                    format!("unknown palette `{value}` (known: {})", names.join(" "))
+                })?;
             }
             "slow_mo_speed" => {
                 self.slow_mo_speed = value
@@ -436,6 +455,23 @@ mod tests {
         assert!(Config::parse("slow_mo_speed = 0.5").is_ok());
         assert!(Config::parse("slow_mo_speed = 0").is_err());
         assert!(Config::parse("slow_mo_speed = 2").is_err());
+    }
+
+    #[test]
+    fn palette_setting_and_key() {
+        assert_eq!(Config::default().palette, 0);
+        let c = Config::parse("palette = Green").unwrap();
+        assert_eq!(palette::PALETTES[c.palette].0, "green");
+        let err = Config::parse("palette = purple").unwrap_err();
+        assert!(
+            err[0].contains("unknown palette `purple` (known: grey green"),
+            "{err:?}"
+        );
+        let b = Bindings::new(&Config::default());
+        assert_eq!(
+            b.key(Keycode::F9),
+            Some(Target::Action(Action::NextPalette))
+        );
     }
 
     #[test]
