@@ -5,8 +5,10 @@
 
 mod audio;
 mod config;
+mod files;
 mod input;
 mod pacing;
+mod png;
 mod save;
 mod video;
 
@@ -136,7 +138,7 @@ fn run(args: Args) -> Result<(), String> {
     }
     let rom_bytes = std::fs::read(&args.rom)
         .map_err(|e| format!("cannot read ROM {}: {e}", args.rom.display()))?;
-    let cart = Cartridge::from_bytes(rom_bytes)
+    let cart = Cartridge::from_bytes(rom_bytes.clone())
         .map_err(|e| format!("cannot load {}: {e}", args.rom.display()))?;
     eprintln!("loaded {}", cart.header().title);
     let model = GameBoy::default_model_for(&cart);
@@ -202,6 +204,10 @@ fn run(args: Args) -> Result<(), String> {
     let mut pads: HashMap<u32, GameController> = HashMap::new();
     let mut input = input::InputState::new(Bindings::new(&cfg));
     let mut fast_forward = false;
+    let mut slow_mo = false;
+    let mut paused = false;
+    let mut slot: u8 = 1;
+    let mut notice = Notice::default();
     let mut pacer = pacing::Pacer::new();
     let mut pixels = vec![0u8; SCREEN_WIDTH * SCREEN_HEIGHT * 4];
     let mut frame_count: u64 = 0;
@@ -272,6 +278,18 @@ fn run(args: Args) -> Result<(), String> {
         }
 
         for (action, down) in actions {
+            // Reset and state files would make a recorded input script unreproducible.
+            let recording_blocks = recording.is_some()
+                && matches!(
+                    action,
+                    Action::Reset | Action::SaveState | Action::LoadState
+                );
+            if recording_blocks {
+                if down {
+                    notice.show(&mut canvas, "disabled while recording");
+                }
+                continue;
+            }
             match (action, down) {
                 (Action::Quit, true) => break 'main,
                 (Action::Fullscreen, true) => {
@@ -284,15 +302,65 @@ fn run(args: Args) -> Result<(), String> {
                     win.set_fullscreen(next)?;
                 }
                 (Action::FastForward, held) => fast_forward = held,
-                _ => {} // wired up in the controls task
+                (Action::SlowMo, held) => slow_mo = held,
+                (Action::Pause, true) => {
+                    paused = !paused;
+                    notice.show(&mut canvas, if paused { "paused" } else { "running" });
+                }
+                (Action::Reset, true) => {
+                    // Keep the battery save (real hardware keeps SRAM across a reset): flush it,
+                    // rebuild the console from the ROM and read the save back.
+                    save.flush(&mut gb, true);
+                    match Cartridge::from_bytes(rom_bytes.clone()) {
+                        Ok(cart) => {
+                            gb = GameBoy::new(cart, model);
+                            if let Some(a) = &audio {
+                                gb.set_sample_rate(a.sample_rate());
+                            }
+                            gb.set_muted_channels(muted_channels);
+                            save = save::SaveFile::open(&args.rom, &mut gb);
+                            notice.show(&mut canvas, "reset");
+                        }
+                        Err(e) => notice.show(&mut canvas, &format!("reset failed: {e}")),
+                    }
+                }
+                (Action::Screenshot, true) => {
+                    let path = files::next_screenshot_path(&args.rom);
+                    let png = png::encode_rgb(
+                        SCREEN_WIDTH as u32,
+                        SCREEN_HEIGHT as u32,
+                        gb.framebuffer(),
+                    );
+                    match std::fs::write(&path, png) {
+                        Ok(()) => notice.show(&mut canvas, &format!("saved {}", path.display())),
+                        Err(e) => notice.show(&mut canvas, &format!("screenshot failed: {e}")),
+                    }
+                }
+                (Action::NextSlot, true) => {
+                    slot = files::next_slot(slot);
+                    notice.show(&mut canvas, &format!("state slot {slot}"));
+                }
+                (Action::SaveState, true) => match files::save_state(&gb, &args.rom, slot) {
+                    Ok(n) => notice.show(&mut canvas, &format!("saved state {slot} ({n} bytes)")),
+                    Err(e) => notice.show(&mut canvas, &e),
+                },
+                (Action::LoadState, true) => match files::load_state(&mut gb, &args.rom, slot) {
+                    Ok(()) => notice.show(&mut canvas, &format!("loaded state {slot}")),
+                    Err(e) => notice.show(&mut canvas, &e),
+                },
+                _ => {} // key releases of one-shot actions
             }
         }
+        notice.tick(&mut canvas);
 
-        gb.set_buttons(input.buttons());
-        if let Some(rec) = recording.as_mut() {
-            rec.frame(frame_count, input.buttons().0);
+        if !paused {
+            gb.set_buttons(input.buttons());
+            if let Some(rec) = recording.as_mut() {
+                rec.frame(frame_count, input.buttons().0);
+            }
+            gb.run_frame();
+            frame_count += 1;
         }
-        gb.run_frame();
 
         for (dst, px) in pixels
             .as_chunks_mut::<4>()
@@ -314,21 +382,28 @@ fn run(args: Args) -> Result<(), String> {
 
         save.flush(&mut gb, false);
 
-        frame_count += 1;
-        if args.frames.is_some_and(|n| frame_count >= n) {
+        if !paused && args.frames.is_some_and(|n| frame_count >= n) {
             break;
         }
-        // Audio-driven pacing when a device is open; otherwise the timer pacer.
-        // Fast-forward discards the audio and uses the timer pacer so a finite speed
-        // multiplier works (0 = uncapped).
-        match audio.as_mut() {
-            Some(a) if fast_forward => {
+        // Audio-driven pacing at normal speed when a device is open; otherwise (and while
+        // paused, fast-forwarding or in slow motion) the timer pacer. Non-normal speeds
+        // discard the audio instead of playing it at the wrong pitch.
+        let speed = if fast_forward {
+            Some(cfg.fast_forward_speed)
+        } else if slow_mo {
+            Some(cfg.slow_mo_speed)
+        } else if paused || audio.is_none() {
+            Some(1.0)
+        } else {
+            None
+        };
+        match (audio.as_mut(), speed) {
+            (Some(a), None) => a.push_and_wait(&mut gb, &mut audio_scratch),
+            (Some(a), Some(s)) => {
                 a.discard(&mut gb, &mut audio_scratch);
-                pacer.wait_for_next_frame(cfg.fast_forward_speed);
+                pacer.wait_for_next_frame(s);
             }
-            Some(a) => a.push_and_wait(&mut gb, &mut audio_scratch),
-            None if fast_forward => pacer.wait_for_next_frame(cfg.fast_forward_speed),
-            None => pacer.wait_for_next_frame(1.0),
+            (None, s) => pacer.wait_for_next_frame(s.unwrap_or(1.0)),
         }
     }
     if let Some(a) = &audio {
@@ -341,6 +416,28 @@ fn run(args: Args) -> Result<(), String> {
     // Quit event also covers SIGINT/SIGTERM: SDL turns them into SDL_QUIT by default.
     save.flush(&mut gb, true);
     Ok(())
+}
+
+/// Short status messages (no text rendering in the window): printed to stderr and shown in the
+/// window title for a few seconds.
+#[derive(Default)]
+struct Notice {
+    until: Option<std::time::Instant>,
+}
+
+impl Notice {
+    fn show(&mut self, canvas: &mut sdl2::render::Canvas<sdl2::video::Window>, msg: &str) {
+        eprintln!("{msg}");
+        let _ = canvas.window_mut().set_title(&format!("gb-sdl - {msg}"));
+        self.until = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+    }
+
+    fn tick(&mut self, canvas: &mut sdl2::render::Canvas<sdl2::video::Window>) {
+        if self.until.is_some_and(|t| std::time::Instant::now() >= t) {
+            self.until = None;
+            let _ = canvas.window_mut().set_title("gb-sdl");
+        }
+    }
 }
 
 /// Writes the input script while you play. Each line is flushed at once, so a crash or kill

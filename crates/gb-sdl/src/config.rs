@@ -11,10 +11,12 @@
 //! swap_ab = false             # Nintendo layout on the gamepad (south = B)
 //! volume = 0.8                # 0.0 - 1.0
 //! fast_forward_speed = 0      # 0 = as fast as possible, otherwise a multiple (2 = double speed)
+//! slow_mo_speed = 0.25        # while the slow-motion key is held
 //! key.fast_forward = F, Tab   # keyboard: comma-separated SDL key names
 //! pad.fast_forward = righttrigger
 //! ```
-//! Bindable names: `right left up down a b start select quit fullscreen fast_forward`.
+//! Bindable names: `right left up down a b start select quit fullscreen fast_forward slow_mo
+//! pause reset screenshot save_state load_state next_slot`.
 //! A `key.NAME` / `pad.NAME` line *replaces* that control's default bindings.
 //! Pad names are SDL's: `a b x y back start leftshoulder rightshoulder dpup dpdown dpleft
 //! dpright leftstick rightstick lefttrigger righttrigger`.
@@ -32,6 +34,17 @@ pub enum Action {
     Fullscreen,
     /// Held: runs at `fast_forward_speed` while pressed.
     FastForward,
+    /// Held: runs at `slow_mo_speed` while pressed.
+    SlowMo,
+    Pause,
+    /// Restart the game as if the console were reset. Battery saves are kept.
+    Reset,
+    Screenshot,
+    /// Quick save / quick load into the current slot.
+    SaveState,
+    LoadState,
+    /// Cycle the current slot 1..=9.
+    NextSlot,
 }
 
 /// What a key or pad input does.
@@ -103,6 +116,28 @@ const CONTROLS: &[ControlRow] = &[
         &["F"],
         &["righttrigger"],
     ),
+    ("slow_mo", Target::Action(Action::SlowMo), &["S"], &[]),
+    ("pause", Target::Action(Action::Pause), &["P"], &[]),
+    ("reset", Target::Action(Action::Reset), &["F10"], &[]),
+    (
+        "screenshot",
+        Target::Action(Action::Screenshot),
+        &["F12"],
+        &[],
+    ),
+    (
+        "save_state",
+        Target::Action(Action::SaveState),
+        &["F5"],
+        &[],
+    ),
+    (
+        "load_state",
+        Target::Action(Action::LoadState),
+        &["F8"],
+        &[],
+    ),
+    ("next_slot", Target::Action(Action::NextSlot), &["F6"], &[]),
 ];
 
 #[derive(Clone, Debug)]
@@ -113,6 +148,8 @@ pub struct Config {
     pub volume: f32,
     /// Multiple of normal speed while fast-forward is held; 0 = uncapped.
     pub fast_forward_speed: f64,
+    /// Multiple of normal speed while slow-motion is held (0.1 to 1).
+    pub slow_mo_speed: f64,
     pub(crate) key_overrides: Vec<(&'static str, Vec<Keycode>)>,
     pub(crate) pad_overrides: Vec<(&'static str, Vec<PadInput>)>,
 }
@@ -125,6 +162,7 @@ impl Default for Config {
             swap_ab: false,
             volume: 1.0,
             fast_forward_speed: 0.0,
+            slow_mo_speed: 0.25,
             key_overrides: Vec::new(),
             pad_overrides: Vec::new(),
         }
@@ -188,6 +226,13 @@ impl Config {
                     .ok()
                     .filter(|v| *v == 0.0 || (1.0..=100.0).contains(v))
                     .ok_or("fast_forward_speed must be 0 (uncapped) or from 1 to 100")?;
+            }
+            "slow_mo_speed" => {
+                self.slow_mo_speed = value
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|v| (0.1..=1.0).contains(v))
+                    .ok_or("slow_mo_speed must be from 0.1 to 1")?;
             }
             _ => {
                 if let Some(name) = key.strip_prefix("key.") {
@@ -371,6 +416,26 @@ mod tests {
         assert!(all.contains("line 6: unknown control `nothing`"), "{all}");
         assert!(all.contains("line 7: fast_forward_speed must be"), "{all}");
         assert_eq!(errs.len(), 7);
+    }
+
+    #[test]
+    fn new_action_defaults_and_slow_mo_range() {
+        let b = Bindings::new(&Config::default());
+        for (k, a) in [
+            (Keycode::P, Action::Pause),
+            (Keycode::F10, Action::Reset),
+            (Keycode::F12, Action::Screenshot),
+            (Keycode::F5, Action::SaveState),
+            (Keycode::F8, Action::LoadState),
+            (Keycode::F6, Action::NextSlot),
+            (Keycode::S, Action::SlowMo),
+        ] {
+            assert_eq!(b.key(k), Some(Target::Action(a)), "{k:?}");
+        }
+        assert_eq!(Config::default().slow_mo_speed, 0.25);
+        assert!(Config::parse("slow_mo_speed = 0.5").is_ok());
+        assert!(Config::parse("slow_mo_speed = 0").is_err());
+        assert!(Config::parse("slow_mo_speed = 2").is_err());
     }
 
     #[test]

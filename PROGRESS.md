@@ -582,7 +582,17 @@ $ cargo test --workspace   (WSL)   -> every suite ok, 0 failed; gb-sdl: test res
 $ cargo clippy --workspace --all-targets -- -D warnings   -> clean;  cargo fmt --all -- --check -> clean
 ```
 
+- [x] Task 5: controls in gb-sdl. New actions (all rebindable with `key.NAME`/`pad.NAME`): pause **P**, reset **F10**, screenshot **F12**, slow-motion **S** (held, `slow_mo_speed`, default 0.25, range 0.1-1), quick save **F5** / quick load **F8** / next slot **F6** (slots 1-9, files `<rom>.stateN`, gitignored as `*.state[1-9]`), fast-forward F / R2 (task 4). Status messages go to stderr and the window title for 3 s (no text rendering). Pad defaults are deliberately only R2 fast-forward; the rest are unbound on the pad so nothing destructive sits on a face button (bind them in config or via Steam Input, see STEAMDECK.md in task 8).
+  - Reset rebuilds the console from the ROM bytes and re-reads the `.sav` (flushed first), like real SRAM surviving a reset. Reset / save state / load state are refused while `--record` is active (they would make the input script unreproducible).
+  - Pause stops `run_frame` and audio, keeps redrawing, uses the timer pacer.
+  - Screenshots: `crates/gb-sdl/src/png.rs`, hand-written uncompressed PNG (stored deflate, CRC32, Adler32), file `<rom>-shot-NNN.png`. Checked against the real decoder by `crates/gb-cli/tests/sdl_png_writer.rs` (includes the 65535/65536-byte block boundaries and a 160x144 image).
+  - **Not verified by a test:** the action glue in `main.rs` (reset, F5/F8, screenshot, pause) is only compile-checked and smoke-run headless (`SDL_VIDEODRIVER=dummy ... --frames 120`: 0 underruns). SDL cannot be driven with key presses here; the owner needs to press the keys once (Deck/desktop check at the task-8 stop).
+```
+$ cargo test --workspace   (WSL)   -> every suite ok, 0 failed; gb-sdl 39 passed; gb-cli sdl_png_writer 3 passed
+$ cargo clippy --workspace --all-targets -- -D warnings -> clean;  cargo fmt --all -- --check -> clean
+```
+
 ### Next (resume here)
 1. (DONE 2026-11-17, 268 passed / 0 failed) Run `scripts/run_all_tests.sh` in WSL (`CARGO_TARGET_DIR=~/gb-target`), confirm 0 failed (watch for the 17th save_state test), update the `docs/ACCURACY.md` table (it now includes `save_state`). If anything fails, fix before starting task 4.
-2. (Task 4 done.) Next: 5 controls (pause/reset/F12 screenshot/fast-forward F + R2/slow-mo/save-state slots), 6 DMG palettes, 7 rewind (R / L2, off by default, configurable buffer), 8 packaging + STEAMDECK.md (owner must test on the Deck), 9 perf, 10-13 docs/CI/review/robustness test.
+2. (Tasks 4 and 5 done.) Next: 6 DMG palettes, 7 rewind (R / L2, off by default, configurable buffer), 8 packaging + STEAMDECK.md (owner must test on the Deck), 9 perf, 10-13 docs/CI/review/robustness test.
 3. Frontend notes: states are ~270 KB each, so a rewind buffer of N states costs about N x 270 KB. Windows Smart App Control blocks test executables: build and test in WSL with a login shell (`wsl bash -lc ...`) so cargo is on PATH.

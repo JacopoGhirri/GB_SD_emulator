@@ -12,6 +12,8 @@ tests/roms/
 
 # Save files and debug dumps
 *.sav
+# Frontend save-state slots (<rom>.stateN)
+*.state[1-9]
 *.ppm
 *.png
 !tests/expected/
