@@ -197,7 +197,7 @@ const STATE_HEADER_LEN: usize = 4 + 4 + 1 + 1 + 8 + 4 + 8;
 impl GameBoy {
     /// Identifies the cartridge a state belongs to: a hash of header bytes 0x134..0x150 (title,
     /// type, ROM/RAM size, version, header and global checksums). Hashing the whole ROM on every
-    /// save (rewind saves often) would be slow; the global checksum already covers its content.
+    /// save (a frontend may save often) would be slow; the global checksum already covers its content.
     fn cartridge_id(&self) -> u64 {
         let rom = self.bus.cartridge().rom();
         state::checksum(rom.get(0x134..0x150).unwrap_or(&[]))

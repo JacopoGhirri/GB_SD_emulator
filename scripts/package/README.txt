@@ -29,10 +29,9 @@ The game list
 
 Controls in a game (defaults; change them in config.ini)
   Gamepad: D-pad / left stick = D-pad, Deck A = Game Boy A, Deck B = Game Boy B,
-           Menu = Start, View = Select, R2 (hold) = fast-forward, L2 (hold) = rewind
-           (rewind is off until you set rewind = true in config.ini).
+           Menu = Start, View = Select, R2 (hold) = fast-forward.
   Keyboard: arrows, X = A, Z = B, Enter = Start, Backspace / Right Shift = Select,
-            F = fast-forward (hold), S = slow motion (hold), R = rewind (hold),
+            F = fast-forward (hold), S = slow motion (hold),
             P = pause, F10 = reset, F5 = quick save, F8 = quick load, F6 = next save slot (1-9),
             F9 = next DMG colour scheme, F12 = screenshot, F11 = fullscreen,
             1-4 = mute a sound channel, + / - = volume.

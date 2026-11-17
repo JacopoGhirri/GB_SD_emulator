@@ -629,7 +629,8 @@ $ cargo test --workspace (WSL) -> all suites ok, 0 failed; gb-sdl 84 passed; cli
 $ scripts/package_deck.sh -> release/gb-sdl-deck.tar.gz (328K) with gb-sdl, run.sh, config.ini, README.txt, LICENSE, empty games/
 ```
 
+- [x] Task 7 REVERTED (2026-11-17, owner decision): rewind removed. On the Deck, with `rewind = true`, L2 did nothing (R2 fast-forward worked), so the owner asked to drop the feature. Removed: `rewind.rs`, the `rewind*` config keys, `Action::Rewind` and its R / L2 bindings, the game-loop code, docs, package README, and the rewind tests. Old config files that still contain the rewind settings load fine: those keys are ignored with a warning (`REMOVED_SETTINGS` in `config.rs`, covered by a test) so Game Mode never fails to start because of a leftover line. Save states (task 3/5) are unaffected. Cause of the L2 failure was never found (not investigated, by decision); the trigger-axis code is shared with R2, which works.
 ### Next (resume here)
 1. (DONE 2026-11-17, 268 passed / 0 failed) Run `scripts/run_all_tests.sh` in WSL (`CARGO_TARGET_DIR=~/gb-target`), confirm 0 failed (watch for the 17th save_state test), update the `docs/ACCURACY.md` table (it now includes `save_state`). If anything fails, fix before starting task 4.
-2. (Tasks 4-7 done, tasks 8 and 8b built and waiting for the owner Deck test.) Next: 9 perf, 10-13 docs/CI/review/robustness test.
+2. (Tasks 4-6, 8, 8b done; rewind removed; the owner Deck test passed except rewind.) Next: 9 perf, 10-13 docs/CI/review/robustness test.
 3. Frontend notes: states are ~270 KB each, so a rewind buffer of N states costs about N x 270 KB. Windows Smart App Control blocks test executables: build and test in WSL with a login shell (`wsl bash -lc ...`) so cargo is on PATH.

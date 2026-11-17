@@ -258,8 +258,8 @@ mod tests {
         );
         assert_eq!(
             s.pad_axis(Axis::TriggerLeft, 32_000),
-            Some((Action::Rewind, true)),
-            "left trigger is rewind"
+            None,
+            "left trigger is not bound"
         );
     }
 

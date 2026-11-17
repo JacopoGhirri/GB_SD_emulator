@@ -103,7 +103,7 @@ messages of a working session, run `./gb-sdl` from Konsole in Desktop Mode.
 - Keys (Desktop Mode): `1`-`4` mute channels 1-4, `+`/`-` volume. `--no-audio` turns sound off. On exit it prints one line of queue statistics (underruns should be 0).
 - Crackle or lag in Game Mode: none reported. If it appears, send the "audio:" line from `~/gb_log.txt`.
 
-## 10. Controls, config file, save states, rewind (phase 8)  [implemented and unit-tested; not yet tried on the Deck]
+## 10. Controls, config file, save states (phase 8)  [implemented and unit-tested; not yet tried on the Deck]
 Everything here can be changed in `config.ini` (`key.NAME = ...` for the keyboard, `pad.NAME = ...` for
 the gamepad; a line replaces that control's defaults). Command-line flags override the file. The file is
 looked up beside the binary, then in `~/.config/gb-sdl/config.ini`; `--config FILE` names one explicitly.
@@ -113,7 +113,6 @@ A mistake in it stops the program with a message naming the line (see `gb_log.tx
 |---|---|---|
 | D-pad / A / B / Start / Select | arrows / X / Z / Enter / Backspace or RShift | D-pad or left stick / Deck A / Deck B / Menu / View |
 | Fast-forward (hold) | F | R2 |
-| Rewind (hold; needs `rewind = true`) | R | L2 |
 | Slow motion (hold) | S | none |
 | Pause | P | none |
 | Reset (battery save is kept) | F10 | none |
@@ -122,7 +121,7 @@ A mistake in it stops the program with a message naming the line (see `gb_log.tx
 | Screenshot (PNG beside the ROM) | F12 | none |
 | Fullscreen / leave the game | F11 / Esc (list in folder mode, quit in direct mode) | Start+Select held 1.5 s = back to the list (folder mode) |
 
-Deliberately only fast-forward and rewind are on the pad by default: nothing destructive (load state,
+Deliberately only fast-forward is on the pad by default: nothing destructive (load state,
 reset) sits on a button you can hit by accident. `pad.save_state = x` and so on in `config.ini` add more.
 
 ### Reaching the rest without a keyboard: Steam Input back buttons  [unconfirmed]
@@ -130,19 +129,16 @@ In Game Mode, open the shortcut's controller settings and bind the back grips to
 L4 = `F5` (quick save), R4 = `F8` (quick load), L5 = `P` (pause), R5 = `F6` (next slot). To quit, use
 Steam button, Exit game, or bind a grip to `Esc`. The emulator only sees keys, so it does not care how
 they got there. (SDL sees Steam's virtual gamepad, which has no back-grip buttons unless Steam Input maps
-them.) The trigger bindings (R2/L2) need no setup: the "Gamepad With Joystick Trackpad" layout passes the
+them.) The trigger binding (R2) needs no setup: the "Gamepad With Joystick Trackpad" layout passes the
 triggers through as analogue axes and they count as pressed past about half travel.
 
-### Save states and rewind: what to know
+### Save states: what to know
 - State files are `<rom>.state1` ... `.state9` beside the ROM (about 270 KB each) and are tied to that
   exact ROM and console model: loading one into another game is refused with a message, not a crash.
-- A state includes the cartridge RAM, so **loading a state (or rewinding) across an in-game save puts the
+- A state includes the cartridge RAM, so **loading a state across an in-game save puts the
   save file back to what it was then** at the next flush. State files are not a substitute for the game's
   own save; keep playing normally and treat quick save as a convenience.
-- Rewind is off by default. `rewind = true` keeps `rewind_seconds` (default 10) of history in memory,
-  one state every `rewind_interval_frames` (default 4): about 40 MB with the defaults. More than 1000
-  states is refused at start-up. Holding L2 (or R on the keyboard) steps backwards at 4x speed; there is no undo.
-- Reset, save state, load state and rewind are disabled while `--record` is active. (`--record` needs a ROM path, not the game list.)
+- Reset, save state and load state are disabled while `--record` is active. (`--record` needs a ROM path, not the game list.)
 - Messages ("saved state 1", "paused", ...) show in the window title for 3 seconds and in `gb_log.txt`;
   there is no on-screen text, so in Game Mode you will mostly notice them by the effect.
 
@@ -167,3 +163,9 @@ in the game window with a built-in font, so there is nothing to install.
 - Two games with the same file name in different sub-folders would share a save name; keep names unique.
 - Not done: remembering the last game between launches (the cursor does stay on the same game while the
   program runs); doing so would need one more file.
+
+## 12. Rewind was tried and removed (2026-11-17)
+A rewind feature (hold L2 / R to step back through recent play) was built and tested in unit tests, but on
+the Deck pressing L2 did nothing, so it was removed at the owner's request. An old `config.ini` that still
+contains `rewind`, `rewind_seconds`, `rewind_interval_frames`, `key.rewind` or `pad.rewind` still loads:
+those lines are ignored. Quick save / quick load (section 10) remain.

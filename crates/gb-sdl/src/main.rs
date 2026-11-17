@@ -20,7 +20,6 @@ mod menu;
 mod pacing;
 mod palette;
 mod png;
-mod rewind;
 mod save;
 mod video;
 

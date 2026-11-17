@@ -1,5 +1,5 @@
 //! Playing one game: the per-frame loop (events, run a frame, draw, pace) plus everything
-//! that belongs to a single game session: battery save, save-state slots, rewind history,
+//! that belongs to a single game session: battery save, save-state slots,
 //! the optional input recording.
 
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use sdl2::event::{Event, WindowEvent};
 use crate::config::{Action, Bindings};
 use crate::frontend::Frontend;
 use crate::layout::Layout;
-use crate::{audio, files, input, pacing, palette, png, rewind, save};
+use crate::{audio, files, input, pacing, palette, png, save};
 
 /// How a game session ended.
 pub enum Exit {
@@ -111,17 +111,6 @@ fn game_loop(
     let mut paused = false;
     let mut slot: u8 = 1;
     let mut palette = cfg.palette;
-    let mut rewind = if cfg.rewind {
-        let capacity = cfg.rewind_capacity()?;
-        eprintln!(
-            "rewind on: {capacity} states, one every {} frames",
-            cfg.rewind_interval_frames
-        );
-        Some(rewind::RewindBuffer::new(capacity))
-    } else {
-        None
-    };
-    let mut rewind_held = false;
     // What is on screen: the core's frame with the DMG colour scheme applied.
     let mut shown = vec![0u32; SCREEN_WIDTH * SCREEN_HEIGHT];
     let mut pacer = pacing::Pacer::new();
@@ -195,7 +184,7 @@ fn game_loop(
             let recording_blocks = s.recording.is_some()
                 && matches!(
                     action,
-                    Action::Reset | Action::SaveState | Action::LoadState | Action::Rewind
+                    Action::Reset | Action::SaveState | Action::LoadState
                 );
             if recording_blocks {
                 if down {
@@ -208,15 +197,6 @@ fn game_loop(
                 (Action::Fullscreen, true) => fe.toggle_fullscreen()?,
                 (Action::FastForward, held) => fast_forward = held,
                 (Action::SlowMo, held) => slow_mo = held,
-                (Action::Rewind, held) => {
-                    if held && rewind.is_none() {
-                        fe.notice.show(
-                            &mut fe.canvas,
-                            "rewind is off (set rewind = true in the config)",
-                        );
-                    }
-                    rewind_held = held;
-                }
                 (Action::Pause, true) => {
                     paused = !paused;
                     fe.notice
@@ -234,9 +214,6 @@ fn game_loop(
                             }
                             s.gb.set_muted_channels(s.muted_channels);
                             s.save = save::SaveFile::open(&s.save_path, &mut s.gb);
-                            if let Some(r) = rewind.as_mut() {
-                                r.clear();
-                            }
                             fe.notice.show(&mut fe.canvas, "reset");
                         }
                         Err(e) => fe
@@ -285,13 +262,9 @@ fn game_loop(
                 },
                 (Action::LoadState, true) => {
                     match files::load_state(&mut s.gb, layout, &s.rom, slot) {
-                        Ok(()) => {
-                            if let Some(r) = rewind.as_mut() {
-                                r.clear();
-                            }
-                            fe.notice
-                                .show(&mut fe.canvas, &format!("loaded state {slot}"));
-                        }
+                        Ok(()) => fe
+                            .notice
+                            .show(&mut fe.canvas, &format!("loaded state {slot}")),
                         Err(e) => fe.notice.show(&mut fe.canvas, &e),
                     }
                 }
@@ -317,30 +290,13 @@ fn game_loop(
             combo_frames = 0;
         }
 
-        let rewinding = rewind_held && rewind.is_some() && !paused;
-        if rewinding {
-            // Go back one stored state per displayed frame instead of running the game. A
-            // loaded state carries its own picture, so nothing else is needed to redraw.
-            if let Some(state) = rewind.as_mut().and_then(|r| r.step_back()) {
-                if let Err(e) = s.gb.load_state(&state) {
-                    fe.notice
-                        .show(&mut fe.canvas, &format!("rewind failed: {e}"));
-                }
-            }
-        } else if !paused {
+        if !paused {
             s.gb.set_buttons(input.buttons());
             if let Some(rec) = s.recording.as_mut() {
                 rec.frame(s.frame_count, input.buttons().0);
             }
             s.gb.run_frame();
             s.frame_count += 1;
-            if let Some(r) = rewind.as_mut() {
-                if s.frame_count
-                    .is_multiple_of(u64::from(cfg.rewind_interval_frames))
-                {
-                    r.push(s.gb.save_state());
-                }
-            }
         }
 
         // The scheme only recolours DMG output; CGB games already carry their own colours.
@@ -359,9 +315,7 @@ fn game_loop(
         // Audio-driven pacing at normal speed when a device is open; otherwise (and while
         // paused, fast-forwarding or in slow motion) the timer pacer. Non-normal speeds
         // discard the audio instead of playing it at the wrong pitch.
-        let speed = if rewinding {
-            Some(1.0)
-        } else if fast_forward {
+        let speed = if fast_forward {
             Some(cfg.fast_forward_speed)
         } else if slow_mo {
             Some(cfg.slow_mo_speed)
