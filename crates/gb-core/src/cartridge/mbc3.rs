@@ -138,7 +138,8 @@ impl Rtc {
             + 60 * self.minutes as u64
             + 3600 * self.hours as u64
             + day_secs * self.days as u64;
-        let total = now + secs;
+        // Saturating: `secs` can come from a damaged save file's timestamp.
+        let total = now.saturating_add(secs);
         let days = total / day_secs;
         if days >= 512 {
             self.day_carry = true;
