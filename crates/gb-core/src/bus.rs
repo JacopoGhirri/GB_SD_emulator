@@ -17,7 +17,7 @@ use crate::serial::Serial;
 pub use crate::serial::{REG_SB, REG_SC};
 use crate::timer::{Timer, REG_DIV, REG_TAC};
 
-pub use crate::interrupts::{INTERRUPT_MASK, REG_IE, REG_IF};
+pub use crate::interrupts::{REG_IE, REG_IF};
 
 /// T-cycles per M-cycle. The CPU does one bus access per M-cycle.
 pub const T_CYCLES_PER_M_CYCLE: u32 = 4;

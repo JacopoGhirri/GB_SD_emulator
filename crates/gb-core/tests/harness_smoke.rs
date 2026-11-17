@@ -1,5 +1,5 @@
 //! Checks that the ROM-test harness itself works. These tests do not check hardware
-//! behaviour; that starts in phase 1 with the Blargg CPU tests.
+//! behaviour; that is what the Blargg, Mooneye and acid2 suites do.
 
 mod common;
 

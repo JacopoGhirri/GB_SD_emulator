@@ -1,4 +1,5 @@
-//! Frame pacing, kept in one function so phase 6 can replace it with audio-driven pacing.
+//! Timer-based frame pacing. Used when there is no audio device, and while paused or in slow
+//! motion; otherwise the audio queue paces the game (see `audio.rs`).
 
 use std::time::{Duration, Instant};
 

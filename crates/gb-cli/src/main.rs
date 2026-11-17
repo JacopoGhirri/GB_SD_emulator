@@ -155,7 +155,7 @@ fn run(args: &RunArgs) -> u8 {
     };
     print_header(&cart);
 
-    // Features that are not implemented fail loudly rather than printing fake data.
+    // Option combinations that cannot work fail loudly instead of printing fake data.
     if args.trace.is_some() && args.max_instructions.is_none() {
         eprintln!("error: --trace needs --max-instructions to know when to stop");
         return EXIT_UNSUPPORTED;

@@ -13,7 +13,7 @@ pub const REG_LCDC: u16 = 0xFF40;
 pub const REG_STAT: u16 = 0xFF41;
 pub const REG_LY: u16 = 0xFF44;
 pub const REG_DMA: u16 = 0xFF46;
-/// First and last audio register, and wave RAM (phase 6 gives them behaviour).
+/// First and last audio register, and wave RAM (decoded by the APU).
 pub const REG_NR10: u16 = 0xFF10;
 pub const REG_NR52: u16 = 0xFF26;
 pub const WAVE_RAM_START: u16 = 0xFF30;

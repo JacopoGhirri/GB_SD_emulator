@@ -2,7 +2,7 @@
 //! at the end of mode 3. This is the seam a pixel-FIFO renderer would replace: it only needs
 //! the PPU registers, VRAM and OAM, and writes one finished line.
 //!
-//! Limitation (documented, out of scope for phase 3): register changes *during* mode 3 are not
+//! Limitation (documented in docs/ACCURACY.md, deliberately not fixed): register changes *during* mode 3 are not
 //! seen, because the line is drawn in one go.
 
 use super::debug::{bg_tile_offset, shade, tile_pixel};
@@ -46,7 +46,7 @@ const CGB_ATTR_BG_PRIORITY: u8 = 0x80;
 /// Entries are little-endian RGB555: `0bBBBBBGGGGGRRRRR`. Each 5-bit channel becomes 8 bits as
 /// `(c << 3) | (c >> 2)` (bit replication), the formula the AGE test suite documents for its reference screenshots. It matches cgb-acid2's
 /// reference too (13 -> 107, 21 -> 173), where plain truncating `c*255/31` is off by one.
-/// No colour correction (out of scope for phase 7).
+/// No colour correction: the raw expanded RGB555 value is shown.
 pub(super) fn cgb_colour(ram: &[u8; 64], pal: u8, idx: u8) -> u32 {
     let i = usize::from(pal) * 8 + usize::from(idx) * 2;
     let v = u16::from_le_bytes([ram[i], ram[i + 1]]);

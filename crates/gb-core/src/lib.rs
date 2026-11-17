@@ -1,26 +1,27 @@
 //! Game Boy / Game Boy Color emulator core.
 //!
-//! Cartridge, bus, SM83 CPU, timer, DMA, the DMG PPU and the APU.
+//! Cartridge, bus, SM83 CPU, timer, DMA, the PPU (DMG and CGB) and the APU. Everything the frontends
+//! need is on [`GameBoy`]; the component modules are private. See `docs/ARCHITECTURE.md`.
 
-pub mod apu;
-pub mod bus;
+mod apu;
+mod bus;
 pub mod cartridge;
-pub mod cpu;
-pub mod dma;
-pub mod hdma;
+mod cpu;
+mod dma;
+mod hdma;
 pub mod input_script;
-pub mod interrupts;
-pub mod io;
-pub mod joypad;
+mod interrupts;
+mod io;
+mod joypad;
 pub mod mooneye;
 pub mod ppu;
-pub mod serial;
+mod serial;
 pub mod state;
-pub mod timer;
+mod timer;
 
-pub use bus::Bus;
+use bus::Bus;
 pub use cartridge::{Cartridge, CartridgeError};
-pub use cpu::Cpu;
+use cpu::Cpu;
 
 /// Hardware model to emulate (CLAUDE.md §4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,10 +37,9 @@ pub use state::StateError;
 pub const SCREEN_WIDTH: usize = 160;
 pub const SCREEN_HEIGHT: usize = 144;
 
-/// Top-level emulator handle. Public API from CLAUDE.md §4.1.
-///
-/// Placeholder: nothing is executed yet. The methods exist so the CLI and tests
-/// can be written against the final signatures.
+/// Top-level emulator handle: one CPU and the bus that owns every other component. This is the
+/// whole public API of the core (CLAUDE.md §4.1): build it from a [`Cartridge`] and a [`Model`],
+/// call [`GameBoy::run_frame`] or [`GameBoy::step`], and read the picture, audio and saves back.
 pub struct GameBoy {
     model: Model,
     cpu: Cpu,

@@ -6,7 +6,7 @@ use super::common::LengthCounter;
 /// byte it fetched (DMG only). Tuned against Blargg dmg_sound 09 and 12.
 const ACCESS_WINDOW_T: u8 = 2;
 /// Extra T-cycles before the first sample after a trigger (DMG). 5 and 6 both pass dmg_sound 09
-/// and 12; 4 passes 10 but breaks 09 and 12 (see PROGRESS.md, phase 6 known issues).
+/// and 12; 4 passes 10 but breaks 09 and 12 (see docs/ACCURACY.md).
 const TRIGGER_DELAY_T: u32 = 6;
 
 #[derive(Debug, Clone)]

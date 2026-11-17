@@ -59,7 +59,7 @@ impl Registers {
     /// CGB hardware running a DMG-only cartridge ("DMG compatibility mode"). Values read out of
     /// the expected-register table inside Mooneye `misc/boot_regs-cgb` (a DMG-flagged ROM titled
     /// "mooneye-gb test"). The real boot ROM derives B (and with it the DMG palette) from a hash
-    /// of the title; other titles may differ, which is not modelled (phase 8 if a game needs it).
+    /// of the title; other titles may differ, which is not modelled (no game tested needed it).
     pub fn post_boot_cgb_compat() -> Registers {
         let mut r = Registers::post_boot_dmg();
         r.set_af(0x1180);

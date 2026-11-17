@@ -16,7 +16,8 @@ use square::Square;
 use wave::Wave;
 
 pub const REG_NR10: u16 = 0xFF10;
-pub const REG_NR50: u16 = 0xFF24;
+#[cfg(test)]
+pub const REG_NR50: u16 = 0xFF24; // only the unit tests name this register; the APU decodes it by range
 pub const REG_NR51: u16 = 0xFF25;
 pub const REG_NR52: u16 = 0xFF26;
 

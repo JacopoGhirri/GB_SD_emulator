@@ -1,4 +1,4 @@
-//! The DMG PPU (pixel processing unit): LCD registers, VRAM, OAM and the line/mode state machine
+//! The PPU (pixel processing unit), DMG and CGB: LCD registers, VRAM, OAM and the line/mode state machine
 //! (Pan Docs "Rendering", "LCD Status Register", "LCD Position and Scrolling").
 //!
 //! The PPU is advanced by `Bus::tick`, 4 dots (T-cycles) per M-cycle. A frame is 154 lines of

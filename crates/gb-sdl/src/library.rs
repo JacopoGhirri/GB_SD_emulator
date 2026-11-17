@@ -1,5 +1,4 @@
 //! Finding the games to list: `.gb` and `.gbc` files under the `games/` folder.
-//! (Phase 9 will add `.gba` here, and the frontend will pick the core by extension.)
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -88,7 +87,7 @@ mod tests {
         for f in ["Tetris.gb", "gold.GBC", "Alleyway.gb", "red.Gb"] {
             touch(&d.join(f));
         }
-        // Not games: saves, states, screenshots, GBA (not supported yet), no extension.
+        // Not games: saves, states, screenshots, other consoles' files, no extension.
         for f in [
             "red.gb.sav",
             "red.gb.state1",
