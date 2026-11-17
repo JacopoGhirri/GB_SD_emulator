@@ -14,14 +14,12 @@ use gb_core::GameBoy;
 /// How often a changed save is flushed while playing.
 pub const FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 
-pub fn save_path(rom: &Path) -> PathBuf {
-    let mut s = rom.as_os_str().to_owned();
-    s.push(".sav");
-    PathBuf::from(s)
-}
-
-/// Write `data` to `path` atomically.
+/// Write `data` to `path` atomically. Missing parent folders (`saves/`) are created here, so
+/// they appear only when the first file is written.
 pub fn write_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
@@ -57,9 +55,9 @@ impl SaveFile {
     /// A save file that never reads or writes anything. Used while recording an input script:
     /// the recording must start from a fresh boot so that a headless replay (which loads no
     /// save) reproduces it exactly, and a recording session must not overwrite a real save.
-    pub fn disabled(rom: &Path) -> SaveFile {
+    pub fn disabled(path: &Path) -> SaveFile {
         SaveFile {
-            path: save_path(rom),
+            path: path.to_path_buf(),
             enabled: false,
             has_rtc: false,
             last_written: Vec::new(),
@@ -69,8 +67,8 @@ impl SaveFile {
 
     /// Load an existing save (if any) into `gb`. Problems are reported on stderr and never
     /// abort: a corrupt save is moved to `<rom>.sav.bad` instead of being overwritten.
-    pub fn open(rom: &Path, gb: &mut GameBoy) -> SaveFile {
-        let path = save_path(rom);
+    pub fn open(path: &Path, gb: &mut GameBoy) -> SaveFile {
+        let path = path.to_path_buf();
         // `save_ram()` is empty exactly when the cartridge has no battery.
         let enabled = !gb.save_ram().is_empty();
         let mut file = SaveFile {
@@ -164,11 +162,12 @@ mod tests {
     }
 
     #[test]
-    fn save_path_appends_sav() {
-        assert_eq!(
-            save_path(Path::new("roms/pokemon.gb")),
-            PathBuf::from("roms/pokemon.gb.sav")
-        );
+    fn write_creates_missing_folders_only_when_writing() {
+        let dir = temp_dir("mkdir");
+        assert!(!dir.join("saves").exists());
+        write_atomic(&dir.join("saves/g.gb.sav"), b"x").unwrap();
+        assert_eq!(fs::read(dir.join("saves/g.gb.sav")).unwrap(), b"x");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

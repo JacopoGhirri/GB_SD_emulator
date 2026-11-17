@@ -23,6 +23,7 @@ strip "$OUT/gb-sdl" 2>/dev/null || true
 cp scripts/package/run.sh "$OUT/run.sh"
 cp scripts/package/README.txt "$OUT/README.txt"
 cp crates/gb-sdl/config.example.ini "$OUT/config.ini"
+mkdir -p "$OUT/games"   # empty on purpose: this is where the ROMs go
 cp LICENSE "$OUT/LICENSE"
 chmod +x "$OUT/gb-sdl" "$OUT/run.sh"
 

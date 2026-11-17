@@ -1,9 +1,20 @@
 #!/bin/bash
-# Launcher for Steam Game Mode. Add THIS file as the Non-Steam game (Target), and set
-# "Start In" to this folder. It plays one ROM: edit ROM below, or copy this script and the
-# shortcut for each game. Errors and messages go to gb_log.txt in this folder.
-ROM="game.gb"          # file name of your own ROM, in this folder (.gb or .gbc)
+# Launcher for Steam Game Mode. Add THIS file as the one Non-Steam game (Target) and set
+# "Start In" to this folder. It opens the game list; pick a game there.
+# Extra arguments are passed on, e.g.  ./run.sh games/tetris.gb  plays that one game directly.
 
 # Steam may not start the program in its own folder, so go there first.
 cd "$(dirname "$(readlink -f "$0")")" || exit 1
-./gb-sdl "$ROM" > gb_log.txt 2>&1
+
+# Messages go to a temporary file outside this folder. Only if the emulator fails is a copy
+# kept here as last_error.txt, so a normal session leaves nothing behind.
+LOG="$(mktemp "${TMPDIR:-/tmp}/gb-sdl.XXXXXX")"
+./gb-sdl "$@" > "$LOG" 2>&1
+status=$?
+if [ "$status" -ne 0 ]; then
+    cp "$LOG" last_error.txt
+else
+    rm -f last_error.txt
+fi
+rm -f "$LOG"
+exit "$status"

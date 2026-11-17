@@ -84,6 +84,15 @@ impl Audio {
         })
     }
 
+    /// Start a game with an empty queue plus the usual cushion of silence (the device kept
+    /// draining while the game list was on screen).
+    pub fn prime(&mut self) {
+        self.queue.clear();
+        if let Err(e) = self.queue.queue_audio(&vec![0.0; self.target * 2]) {
+            eprintln!("warning: audio queue error: {e}");
+        }
+    }
+
     pub fn sample_rate(&self) -> u32 {
         self.rate
     }

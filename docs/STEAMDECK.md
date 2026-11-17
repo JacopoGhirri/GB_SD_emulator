@@ -15,21 +15,25 @@ Nothing is built on the Deck, so SteamOS needs no changes (no unlocking the root
 2. Copy the `.tar.gz` to the Deck and unpack it (`tar xzf gb-sdl-deck.tar.gz`). SteamOS already ships
    `libSDL2` at runtime. Copying only the `gb-sdl` binary (the way it was first done) still works too.
 
-## 2. Folder layout on the Deck  [confirmed]
+## 2. Folder layout on the Deck  [old single-ROM layout confirmed; the games/ layout is unconfirmed]
 ```
 /home/deck/Desktop/gb_emu/
     gb-sdl            the binary (chmod +x gb-sdl)
     run.sh            wrapper script, see section 4 (chmod +x run.sh)
     config.ini        optional settings (section 10); found automatically beside the binary
-    Pokemon_Red.gb    your own dumped ROM
+    games/            your own dumped ROMs (.gb / .gbc), sub-folders allowed
+    saves/            created on first save: <game>.sav and <game>.state1..9
+    screenshots/      created on first F12
 ```
-(The package's `run.sh` has a `ROM=` line to edit, and writes its log to `gb_log.txt` in the same folder
-instead of `~/gb_log.txt`.)
-Copy the ROM too: the first attempt failed with `cannot read ROM: No such file` only because the ROM
-had not been copied yet.
+`saves/` and `screenshots/` do not exist until something is written to them, and a normal session
+creates no log file (see section 7). The older layout (binary, one ROM and its `.sav` side by side,
+started as `./gb-sdl Pokemon_Red.gb`) still works exactly as before; it is "direct mode" below.
+Copy the ROMs into `games/`. (An early failure with `cannot read ROM: No such file` was only a ROM
+that had not been copied yet.)
 
 ## 3. Try it in Desktop Mode first  [confirmed]
-From Konsole, in that folder: `./gb-sdl Pokemon_Red.gb`
+From Konsole, in that folder: `./gb-sdl` opens the game list (section 11), or `./gb-sdl games/Pokemon_Red.gb`
+plays one game directly (its save then goes beside the ROM instead of into `saves/`).
 
 - Keyboard: arrows, Z = B, X = A, Enter = Start, Backspace/RShift = Select, F (hold) = fast-forward,
   F11 = fullscreen, Esc = quit. Full list in section 10. (Tab is **no longer** fast-forward.)
@@ -40,18 +44,22 @@ From Konsole, in that folder: `./gb-sdl Pokemon_Red.gb`
   left-hand one, whereas on the Deck A is the lower button and B the right-hand one. Pass `--swap-ab`
   to get the Nintendo physical layout (Deck B/east = GB A, Deck A/south = GB B).
 
-## 4. Game Mode: use a wrapper script  [confirmed: works]
+## 4. Game Mode: use a wrapper script  [confirmed: a wrapper works; the new one is unconfirmed]
 Launching `gb-sdl` directly as the Steam target closed instantly in Game Mode. A wrapper script fixed it.
-`/home/deck/Desktop/gb_emu/run.sh`:
+The packaged `run.sh`:
 ```bash
-#!/bin/bash
-cd /home/deck/Desktop/gb_emu
-./gb-sdl Pokemon_Red.gb > /home/deck/gb_log.txt 2>&1
+cd "$(dirname "$(readlink -f "$0")")" || exit 1
+LOG="$(mktemp "${TMPDIR:-/tmp}/gb-sdl.XXXXXX")"
+./gb-sdl "$@" > "$LOG" 2>&1
+status=$?
+if [ "$status" -ne 0 ]; then cp "$LOG" last_error.txt; else rm -f last_error.txt; fi
+rm -f "$LOG"
+exit "$status"
 ```
 Why it helps: **the exact cause of the instant close is unconfirmed.** Suspects are the working
-directory (Steam may not start the program in its own folder, so a relative ROM path fails), the
-relative ROM path itself, or `--fullscreen` under Game Mode. The script fixes the first two by
-changing directory first, and it captures any error text in a log. The working setup does **not** use
+directory (Steam may not start the program in its own folder), a relative ROM path, or `--fullscreen`
+under Game Mode. The script fixes the first by changing directory first. Messages go to a temporary
+file, and only a failed run leaves `last_error.txt` in the folder. The working setup does **not** use
 `--fullscreen`.
 
 ## 5. Steam settings (Desktop Mode, then switch to Game Mode)
@@ -65,21 +73,25 @@ changing directory first, and it captures any error text in a log. The working s
    not to a gamepad.
 4. Launch from the library in Game Mode.  [confirmed: owner reports it "works perfectly"]
 
-One shortcut plays one ROM (the ROM name is inside `run.sh`). For another game, copy the script and
-shortcut, or edit the ROM name.
+One shortcut is enough: it opens the game list and you choose the game there (section 11). To launch one
+fixed game from its own shortcut instead, put the path in the shortcut's Launch Options, e.g. `games/Tetris.gb`.
 
-## 6. Saves  [confirmed in WSL and on the Deck in Game Mode]
-The battery save is written beside the ROM as `<rom>.sav`, so here
-`/home/deck/Desktop/gb_emu/Pokemon_Red.gb.sav`. The script's `cd` is what puts it there, since the ROM
-path is relative. Saves are flushed on quit, window close, focus loss and every 30 s if changed.
-Quit from Game Mode with Steam button, Exit game (or Esc with a keyboard).
+## 6. Saves  [direct mode confirmed on the Deck; the saves/ folder is unconfirmed]
+- **Game list (folder mode):** `saves/<game file name>.sav`, e.g. `saves/Pokemon_Red.gb.sav`. A save that
+  still sits beside the ROM (from the old layout, or copied there by hand) is moved into `saves/`
+  the first time that game is started; an existing `saves/` file is never overwritten.
+- **Direct mode (`./gb-sdl game.gb`):** `<rom>.sav` beside the ROM, as before.
+- Saves are flushed on quit, window close, focus loss, when going back to the list, and every 30 s if
+  changed. Quit from Game Mode with Steam button, Exit game (or Esc with a keyboard).
+- Back up the `saves/` folder to keep your progress.
 
 - Save, quit, relaunch, Continue works in WSL (WSLg window).  [confirmed]
-- The same round trip on the Deck in Game Mode: opens, saves, reopens fine.  [confirmed]
+- The same round trip on the Deck in Game Mode (direct mode): opens, saves, reopens fine.  [confirmed]
 
 ## 7. When something goes wrong
-Read `/home/deck/gb_log.txt` (it is overwritten at every launch). Errors such as `cannot read ROM ...`
-appear there, because the script redirects stdout and stderr to it.
+If the emulator fails to start or crashes, the launcher leaves `last_error.txt` in the program folder
+with the messages (for example `cannot read ROM ...`). A normal session leaves no log. To see the
+messages of a working session, run `./gb-sdl` from Konsole in Desktop Mode.
 
 ## 8. Still unconfirmed on the Deck
 - Nothing important. Confirmed: D-pad, left stick (2026-11-16), View = Select (2026-11-16), Deck A = GB A, Deck B = GB B, Menu (three lines) = Start.
@@ -108,7 +120,7 @@ A mistake in it stops the program with a message naming the line (see `gb_log.tx
 | Quick save / quick load / next slot (1-9) | F5 / F8 / F6 | none |
 | Next DMG colour scheme | F9 | none |
 | Screenshot (PNG beside the ROM) | F12 | none |
-| Fullscreen / quit | F11 / Esc | none (Steam button, Exit game) |
+| Fullscreen / leave the game | F11 / Esc (list in folder mode, quit in direct mode) | Start+Select held 1.5 s = back to the list (folder mode) |
 
 Deliberately only fast-forward and rewind are on the pad by default: nothing destructive (load state,
 reset) sits on a button you can hit by accident. `pad.save_state = x` and so on in `config.ini` add more.
@@ -130,6 +142,28 @@ triggers through as analogue axes and they count as pressed past about half trav
 - Rewind is off by default. `rewind = true` keeps `rewind_seconds` (default 10) of history in memory,
   one state every `rewind_interval_frames` (default 4): about 40 MB with the defaults. More than 1000
   states is refused at start-up. Holding L2 (or R on the keyboard) steps backwards at 4x speed; there is no undo.
-- Reset, save state, load state and rewind are disabled while `--record` is active.
+- Reset, save state, load state and rewind are disabled while `--record` is active. (`--record` needs a ROM path, not the game list.)
 - Messages ("saved state 1", "paused", ...) show in the window title for 3 seconds and in `gb_log.txt`;
   there is no on-screen text, so in Game Mode you will mostly notice them by the effect.
+
+## 11. The game list (folder mode)  [implemented, unit-tested and smoke-run headless; not yet tried on the Deck]
+Started without a ROM (`./gb-sdl`, or the packaged `run.sh`), the program lists every `.gb` / `.gbc` file
+under `games/` (up to 3 folder levels down; hidden files skipped), sorted by name, and you pick one.
+`./gb-sdl <folder>` does the same for another folder that has a `games/` inside. The list is drawn
+in the game window with a built-in font, so there is nothing to install.
+
+| | Keyboard | Gamepad |
+|---|---|---|
+| Move | Up / Down (hold to scroll) | D-pad or left stick |
+| Page | Left / Right, PgUp / PgDn | D-pad left/right, L1 / R1 |
+| Play | Enter, Space | A or Start |
+| Quit | Esc | B or View |
+
+- A game that cannot be loaded (damaged file, unsupported cartridge) is reported in the bottom line of the
+  list and the list stays open. Files added while you play appear when you come back to the list.
+- **Back to the list from a game:** Esc on a keyboard, or hold **Start + Select for 1.5 seconds** on the
+  gamepad (a message appears after half a second). The game's save is written first. Closing the window,
+  or Steam button, Exit game, quits the whole program. In direct mode Esc quits, as before.
+- Two games with the same file name in different sub-folders would share a save name; keep names unique.
+- Not done: remembering the last game between launches (the cursor does stay on the same game while the
+  program runs); doing so would need one more file.

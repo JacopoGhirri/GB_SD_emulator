@@ -616,7 +616,20 @@ $ scripts/package_deck.sh (WSL) -> package: release/gb-sdl-deck/ ; archive: rele
 $ cargo test --workspace --exclude gb-core -> ok, 0 failed; gb-sdl 55 passed;  clippy -D warnings clean; fmt clean
 ```
 
+- [~] Task 8b (added at the owner's request 2026-11-17): **game list + tidy folder**, one Steam shortcut for all games. Built and checked in WSL; the owner's Deck test of tasks 8 + 8b is still pending.
+  - `gb-sdl` with no ROM (or `gb-sdl <folder>`) shows a list of `.gb`/`.gbc` under `games/` (3 levels deep, hidden skipped, sorted, `library.rs`); pick with D-pad/stick + A/Start (keyboard arrows + Enter), B/View/Esc quits, hold to scroll, L1/R1 or left/right to page. Drawn in the 160x144 game picture with a hand-written 5x7 font (`font.rs`, no dependency, tested glyph table), so same window, scaling and pacing (`menu.rs`). `gb-sdl game.gb` (direct mode) is unchanged: files beside the ROM.
+  - Leaving a game returns to the list (owner's choice): Esc, or hold Start+Select 1.5 s (for the Deck without a keyboard). Window close / Steam Exit game quits everything. Cursor stays on the last game; the folder is re-scanned on return. A ROM that fails to load shows its error in the list footer, not a crash. `--record` needs a ROM path (refused in folder mode).
+  - Clutter: folder mode puts files in `saves/` (`<game>.sav`, `.state1..9`) and `screenshots/`, created only when first written (`write_atomic` and the screenshot code create parents). A `.sav` still beside the ROM is moved into `saves/` once and never overwrites an existing one (`layout.rs`). The package `run.sh` sends output to a temp file and keeps `last_error.txt` only on failure (removed after a clean run); the package ships an empty `games/`.
+  - Refactor: `main.rs` split into `frontend.rs` (window/audio/pads, shared), `game.rs` (the per-game loop; cleanup now always runs, even after an error), `menu.rs`, `layout.rs`, `library.rs`, `font.rs`. `SaveFile::open/disabled` take the save path; `Audio::prime()` added.
+  - Tests: 84 gb-sdl tests (menu navigation/wrap/paging/scroll/refresh/render, key repeat timing, font, scan, layout incl. legacy-save move, argument modes). `GB_SDL_DUMP_MENU=x.png cargo test -p gb-sdl dump_menu` writes a picture of the list (candidate README screenshot, uses made-up game names).
+  - Checked headless (`SDL_VIDEODRIVER=dummy`): folder mode starts and idles 3 s without creating any file; a missing `games/` shows the help screen; direct mode still plays; packaged `run.sh` leaves `last_error.txt` only on failure.
+  - **Not verified by a test:** pressing a key/button in the list to launch a game, and coming back from it (the glue between `menu::run` and `game::play`), plus the Start+Select exit. Same SDL-input limitation as task 5; the owner's Deck/desktop check covers it.
+```
+$ cargo test --workspace (WSL) -> all suites ok, 0 failed; gb-sdl 84 passed; clippy -D warnings clean; fmt clean
+$ scripts/package_deck.sh -> release/gb-sdl-deck.tar.gz (328K) with gb-sdl, run.sh, config.ini, README.txt, LICENSE, empty games/
+```
+
 ### Next (resume here)
 1. (DONE 2026-11-17, 268 passed / 0 failed) Run `scripts/run_all_tests.sh` in WSL (`CARGO_TARGET_DIR=~/gb-target`), confirm 0 failed (watch for the 17th save_state test), update the `docs/ACCURACY.md` table (it now includes `save_state`). If anything fails, fix before starting task 4.
-2. (Tasks 4-7 done, task 8 built and waiting for the owner Deck test.) Next: 9 perf, 10-13 docs/CI/review/robustness test.
+2. (Tasks 4-7 done, tasks 8 and 8b built and waiting for the owner Deck test.) Next: 9 perf, 10-13 docs/CI/review/robustness test.
 3. Frontend notes: states are ~270 KB each, so a rewind buffer of N states costs about N x 270 KB. Windows Smart App Control blocks test executables: build and test in WSL with a login shell (`wsl bash -lc ...`) so cargo is on PATH.

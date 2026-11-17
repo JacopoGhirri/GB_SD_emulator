@@ -3,6 +3,11 @@ target/
 
 # User's own game ROMs: never commit (CLAUDE.md §10)
 roms/
+# Folder-mode layout of the frontend, if run from the repo root
+/games/
+/saves/
+/screenshots/
+last_error.txt
 
 # Local release/packaging output
 release/
