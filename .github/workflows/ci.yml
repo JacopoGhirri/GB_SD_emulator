@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # gb-sdl links the system SDL2 (phase 4).
+      # gb-sdl links the system SDL2.
       - name: Install SDL2 development files
         run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
 
@@ -19,6 +19,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -37,5 +40,33 @@ jobs:
       - name: Fetch Doctor logs
         run: bash scripts/fetch_doctor_logs.sh
 
-      - name: Test
-        run: cargo test --workspace
+      # In CI a missing ROM bundle must fail the job instead of letting every ROM test
+      # skip and the run look green.
+      - name: Check the test ROMs are really there
+        run: |
+          test -d tests/roms/game-boy-test-roms-v7.0 || { echo "test ROM bundle missing"; exit 1; }
+          test -d tests/roms/gameboy-doctor || { echo "Doctor logs missing"; exit 1; }
+
+      # Runs `cargo test --workspace` and prints the scoreboard (suite, passed, failed,
+      # skipped); exits non-zero if any test fails. Tests that need the owner's own game
+      # ROMs (pokemon_local, the Pokemon check in save_state) skip here by design.
+      - name: Test and scoreboard
+        run: |
+          set -o pipefail
+          bash scripts/run_all_tests.sh | tee scoreboard.txt
+          { echo '```'; cat scoreboard.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check markdown links
+        run: bash scripts/check_docs.sh
+
+      # The Steam Deck package must keep building (and must not contain ROMs or saves).
+      - name: Build the Steam Deck package
+        run: bash scripts/package_deck.sh
+
+      - name: Upload the Deck package and the full test log
+        uses: actions/upload-artifact@v4
+        with:
+          name: gb-sdl-deck
+          path: |
+            release/gb-sdl-deck.tar.gz
+            target/run_all_tests.log
