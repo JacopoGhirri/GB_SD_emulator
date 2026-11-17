@@ -12,12 +12,15 @@
 //! volume = 0.8                # 0.0 - 1.0
 //! fast_forward_speed = 0      # 0 = as fast as possible, otherwise a multiple (2 = double speed)
 //! slow_mo_speed = 0.25        # while the slow-motion key is held
+//! rewind = false              # off by default; hold R (Deck: L2) to rewind when on
+//! rewind_seconds = 10         # history length
+//! rewind_interval_frames = 4  # one stored state per 4 frames (about 270 KB each)
 //! palette = grey              # DMG colours: grey green pocket mint (F9 cycles in game)
 //! key.fast_forward = F, Tab   # keyboard: comma-separated SDL key names
 //! pad.fast_forward = righttrigger
 //! ```
 //! Bindable names: `right left up down a b start select quit fullscreen fast_forward slow_mo
-//! pause reset screenshot save_state load_state next_slot next_palette`.
+//! pause reset screenshot save_state load_state next_slot next_palette rewind`.
 //! A `key.NAME` / `pad.NAME` line *replaces* that control's default bindings.
 //! Pad names are SDL's: `a b x y back start leftshoulder rightshoulder dpup dpdown dpleft
 //! dpright leftstick rightstick lefttrigger righttrigger`.
@@ -25,6 +28,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::palette;
+use crate::rewind;
 use gb_core::Buttons;
 use sdl2::controller::{Axis, Button};
 use sdl2::keyboard::Keycode;
@@ -49,6 +53,8 @@ pub enum Action {
     NextSlot,
     /// Cycle the DMG colour scheme.
     NextPalette,
+    /// Held: step back through the rewind history (only when `rewind = true`).
+    Rewind,
 }
 
 /// What a key or pad input does.
@@ -148,6 +154,12 @@ const CONTROLS: &[ControlRow] = &[
         &["F9"],
         &[],
     ),
+    (
+        "rewind",
+        Target::Action(Action::Rewind),
+        &["R"],
+        &["lefttrigger"],
+    ),
 ];
 
 #[derive(Clone, Debug)]
@@ -162,6 +174,12 @@ pub struct Config {
     pub slow_mo_speed: f64,
     /// Index into `palette::PALETTES` (DMG colour scheme).
     pub palette: usize,
+    /// Rewind is off by default: it costs memory (about 270 KB per stored state).
+    pub rewind: bool,
+    /// How much play the history covers.
+    pub rewind_seconds: f64,
+    /// A state is stored every this many frames.
+    pub rewind_interval_frames: u32,
     pub(crate) key_overrides: Vec<(&'static str, Vec<Keycode>)>,
     pub(crate) pad_overrides: Vec<(&'static str, Vec<PadInput>)>,
 }
@@ -176,6 +194,9 @@ impl Default for Config {
             fast_forward_speed: 0.0,
             slow_mo_speed: 0.25,
             palette: 0,
+            rewind: false,
+            rewind_seconds: 10.0,
+            rewind_interval_frames: 4,
             key_overrides: Vec::new(),
             pad_overrides: Vec::new(),
         }
@@ -208,11 +229,22 @@ impl Config {
                 errors.push(format!("line {n}: {e}"));
             }
         }
+        // Memory cap: needs two settings at once, so it is checked after all lines are read.
+        if errors.is_empty() && cfg.rewind {
+            if let Err(e) = cfg.rewind_capacity() {
+                errors.push(e);
+            }
+        }
         if errors.is_empty() {
             Ok(cfg)
         } else {
             Err(errors)
         }
+    }
+
+    /// Number of states the rewind buffer will hold (checked against the memory cap).
+    pub fn rewind_capacity(&self) -> Result<usize, String> {
+        rewind::capacity_for(self.rewind_seconds, self.rewind_interval_frames)
     }
 
     fn set(&mut self, key: &str, value: &str) -> Result<(), String> {
@@ -245,6 +277,21 @@ impl Config {
                     let names: Vec<&str> = palette::PALETTES.iter().map(|p| p.0).collect();
                     format!("unknown palette `{value}` (known: {})", names.join(" "))
                 })?;
+            }
+            "rewind" => self.rewind = parse_bool(key, value)?,
+            "rewind_seconds" => {
+                self.rewind_seconds = value
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|v| (1.0..=600.0).contains(v))
+                    .ok_or("rewind_seconds must be from 1 to 600")?;
+            }
+            "rewind_interval_frames" => {
+                self.rewind_interval_frames = value
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|v| (1..=60).contains(v))
+                    .ok_or("rewind_interval_frames must be an integer from 1 to 60")?;
             }
             "slow_mo_speed" => {
                 self.slow_mo_speed = value
@@ -471,6 +518,31 @@ mod tests {
         assert_eq!(
             b.key(Keycode::F9),
             Some(Target::Action(Action::NextPalette))
+        );
+    }
+
+    #[test]
+    fn rewind_is_off_by_default_and_memory_is_capped() {
+        let d = Config::default();
+        assert!(!d.rewind);
+        assert_eq!(d.rewind_capacity(), Ok(150));
+        let on = Config::parse("rewind = true\nrewind_seconds = 30\n").unwrap();
+        assert_eq!(on.rewind_capacity(), Ok(450));
+        let err = Config::parse("rewind = true\nrewind_seconds = 300\n").unwrap_err();
+        assert!(err[0].contains("limit is 1000"), "{err:?}");
+        // The cap is not checked while rewind is off.
+        assert!(Config::parse("rewind_seconds = 300\n").is_ok());
+        assert!(Config::parse("rewind_interval_frames = 0").is_err());
+        assert!(Config::parse("rewind_seconds = 0").is_err());
+    }
+
+    #[test]
+    fn rewind_key_and_trigger_defaults() {
+        let b = Bindings::new(&Config::default());
+        assert_eq!(b.key(Keycode::R), Some(Target::Action(Action::Rewind)));
+        assert_eq!(
+            b.pad(PadInput::Trigger(Axis::TriggerLeft)),
+            Some(Target::Action(Action::Rewind))
         );
     }
 

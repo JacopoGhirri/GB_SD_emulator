@@ -598,7 +598,15 @@ $ cargo test --workspace --exclude gb-core   (WSL; gb-core untouched by this com
 $ cargo clippy --workspace --all-targets -- -D warnings -> clean;  cargo fmt --all -- --check -> clean
 ```
 
+- [x] Task 7: rewind (`crates/gb-sdl/src/rewind.rs`). **Off by default** (`rewind = true` to enable). `rewind_seconds` (1-600, default 10) and `rewind_interval_frames` (1-60, default 4) set a ring of save states (default 150 states, about 40 MB). Hold **R** / Deck **L2** (`lefttrigger`): one stored state is loaded per displayed frame (4x speed backwards with the default interval), audio is discarded. The oldest state is kept, so holding at the start of history stays there; no undo (newer states are dropped). Memory cap: more than 1000 states (about 270 MB) is a config error with an explanatory message (checked only when rewind is on). Reset and quick load clear the history. Rewind is refused while `--record` is active.
+  - Heads-up: loading a state also restores cart RAM, so rewinding (or quick-loading) across an in-game save reverts the `.sav` at the next flush. That is the normal time-travel behaviour of state-based rewind; STEAMDECK.md will say so.
+  - Tests: 8 ring-buffer unit tests (order, oldest kept, eviction, replace-the-future, clear, hard cap, capacity maths) + 2 config tests. Smoke run on Pokemon Red, headless, state captured every frame for 600 frames: 1.6 s user CPU for 10 s of play (worst case; the default is every 4th frame). The rewind keypress path itself is not exercised by a test (same limitation as task 5); owner check on the desktop/Deck.
+```
+$ cargo test --workspace --exclude gb-core (WSL) -> ok, 0 failed; gb-sdl 54 passed
+$ cargo clippy --workspace --all-targets -- -D warnings -> clean;  cargo fmt --all -- --check -> clean
+```
+
 ### Next (resume here)
 1. (DONE 2026-11-17, 268 passed / 0 failed) Run `scripts/run_all_tests.sh` in WSL (`CARGO_TARGET_DIR=~/gb-target`), confirm 0 failed (watch for the 17th save_state test), update the `docs/ACCURACY.md` table (it now includes `save_state`). If anything fails, fix before starting task 4.
-2. (Tasks 4-6 done.) Next: 7 rewind (R / L2, off by default, configurable buffer), 8 packaging + STEAMDECK.md (owner must test on the Deck), 9 perf, 10-13 docs/CI/review/robustness test.
+2. (Tasks 4-7 done.) Next: 8 packaging + STEAMDECK.md (owner must test on the Deck), 9 perf, 10-13 docs/CI/review/robustness test.
 3. Frontend notes: states are ~270 KB each, so a rewind buffer of N states costs about N x 270 KB. Windows Smart App Control blocks test executables: build and test in WSL with a login shell (`wsl bash -lc ...`) so cargo is on PATH.
