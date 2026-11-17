@@ -574,7 +574,15 @@ test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 ```
   **Verified 2026-11-17** (WSL, `CARGO_TARGET_DIR=~/gb-target scripts/run_all_tests.sh`, committed tree): `TOTAL 268 passed, 0 failed, 0 ignored, 1 skipped` (the deliberate harness_smoke skip); `save_state 18 passed` (17 tests + the Pokemon real-game test), `unit: gb_core 164`, `cpu_instrs 12`, `mooneye 9`, `pokemon_local 2`. Table in `docs/ACCURACY.md`.
 
+- [x] Task 4: config file (`crates/gb-sdl/src/config.rs`, no new dependency). `key = value` lines, `#`/`;` comments; defaults when no file; `--config FILE` or `config.ini` beside the program, then `$XDG_CONFIG_HOME|~/.config/gb-sdl/config.ini`. Keys now: `scale fullscreen swap_ab volume fast_forward_speed` plus `key.NAME` / `pad.NAME` (replace that control's defaults; comma lists; SDL key/pad names). Precedence CLI > config > defaults (`apply_cli`). Bad key/value, duplicate key, unknown control: one error line each with its line number, program refuses to start. Later tasks add their own keys (palette, slow-mo, rewind) when the feature exists, to avoid dead fields.
+  - Fast-forward is now keyboard **F** (Tab unmapped) and Deck **R2** (`righttrigger`; SDL triggers are axes, handled with a threshold and edge events in `input.rs`). Unplugging a pad releases a held trigger action. `Pacer::wait_for_next_frame(speed)` takes a multiple (0 = uncapped).
+  - Note: SDL's axis names are `lefttrigger`/`righttrigger` (my first guess `triggerright` failed the unit test).
+```
+$ cargo test --workspace   (WSL)   -> every suite ok, 0 failed; gb-sdl: test result: ok. 32 passed; 0 failed
+$ cargo clippy --workspace --all-targets -- -D warnings   -> clean;  cargo fmt --all -- --check -> clean
+```
+
 ### Next (resume here)
 1. (DONE 2026-11-17, 268 passed / 0 failed) Run `scripts/run_all_tests.sh` in WSL (`CARGO_TARGET_DIR=~/gb-target`), confirm 0 failed (watch for the 17th save_state test), update the `docs/ACCURACY.md` table (it now includes `save_state`). If anything fails, fix before starting task 4.
-2. Task 4: config file (`gb-sdl/src/config.rs`). Then 5 controls (pause/reset/F12 screenshot/fast-forward F + R2/slow-mo/save-state slots), 6 DMG palettes, 7 rewind (R / L2, off by default, configurable buffer), 8 packaging + STEAMDECK.md (owner must test on the Deck), 9 perf, 10-13 docs/CI/review/robustness test.
+2. (Task 4 done.) Next: 5 controls (pause/reset/F12 screenshot/fast-forward F + R2/slow-mo/save-state slots), 6 DMG palettes, 7 rewind (R / L2, off by default, configurable buffer), 8 packaging + STEAMDECK.md (owner must test on the Deck), 9 perf, 10-13 docs/CI/review/robustness test.
 3. Frontend notes: states are ~270 KB each, so a rewind buffer of N states costs about N x 270 KB. Windows Smart App Control blocks test executables: build and test in WSL with a login shell (`wsl bash -lc ...`) so cargo is on PATH.

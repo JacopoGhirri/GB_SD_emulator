@@ -4,6 +4,7 @@
 //! save if due, then wait for the frame deadline (see `pacing`).
 
 mod audio;
+mod config;
 mod input;
 mod pacing;
 mod save;
@@ -13,6 +14,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use config::{Action, Bindings, Config};
 use gb_core::{Cartridge, GameBoy, SCREEN_HEIGHT, SCREEN_WIDTH};
 use sdl2::controller::GameController;
 use sdl2::event::{Event, WindowEvent};
@@ -21,7 +23,9 @@ use sdl2::rect::Rect;
 use sdl2::video::FullscreenType;
 
 const USAGE: &str =
-    "usage: gb-sdl <rom.gb> [--scale N] [--fullscreen] [--swap-ab] [--frames N] [--record FILE] [--no-audio]\n\
+    "usage: gb-sdl <rom.gb> [--config FILE] [--scale N] [--fullscreen] [--swap-ab] [--frames N] [--record FILE] [--no-audio]\n\
+  --config FILE  settings file (default: config.ini beside the program, then\n\
+                 ~/.config/gb-sdl/config.ini; see docs/STEAMDECK.md). Flags below override it.\n\
   --scale N      initial window scale (default 4)\n\
   --fullscreen   start fullscreen (F11 toggles)\n\
   --swap-ab      swap the gamepad face buttons (default: east = B, south = A)\n\
@@ -32,7 +36,9 @@ const USAGE: &str =
 
 struct Args {
     rom: PathBuf,
-    scale: u32,
+    config: Option<PathBuf>,
+    /// `None` = not given on the command line (the config file / default decides).
+    scale: Option<u32>,
     fullscreen: bool,
     swap_ab: bool,
     frames: Option<u64>,
@@ -44,7 +50,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut rom = None;
     let mut out = Args {
         rom: PathBuf::new(),
-        scale: 4,
+        config: None,
+        scale: None,
         fullscreen: false,
         swap_ab: false,
         frames: None,
@@ -56,11 +63,15 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         match a.as_str() {
             "--scale" => {
                 let v = it.next().ok_or("--scale needs a number")?;
-                out.scale = v
-                    .parse::<u32>()
-                    .ok()
-                    .filter(|s| (1..=20).contains(s))
-                    .ok_or("--scale must be an integer from 1 to 20")?;
+                out.scale = Some(
+                    v.parse::<u32>()
+                        .ok()
+                        .filter(|s| (1..=20).contains(s))
+                        .ok_or("--scale must be an integer from 1 to 20")?,
+                );
+            }
+            "--config" => {
+                out.config = Some(PathBuf::from(it.next().ok_or("--config needs a file")?));
             }
             "--frames" => {
                 let v = it.next().ok_or("--frames needs a number")?;
@@ -105,7 +116,24 @@ fn main() -> ExitCode {
     }
 }
 
+/// Precedence: command-line flags > config file > defaults. A flag can only switch a
+/// boolean on; to turn one off, edit the config file.
+fn apply_cli(cfg: &mut Config, args: &Args) {
+    if let Some(scale) = args.scale {
+        cfg.scale = scale;
+    }
+    cfg.fullscreen |= args.fullscreen;
+    cfg.swap_ab |= args.swap_ab;
+}
+
 fn run(args: Args) -> Result<(), String> {
+    let (mut cfg, cfg_path) =
+        Config::load(args.config.as_deref()).map_err(|errs| errs.join("\n"))?;
+    apply_cli(&mut cfg, &args);
+    match &cfg_path {
+        Some(p) => eprintln!("config: {}", p.display()),
+        None => eprintln!("config: none found, using defaults"),
+    }
     let rom_bytes = std::fs::read(&args.rom)
         .map_err(|e| format!("cannot read ROM {}: {e}", args.rom.display()))?;
     let cart = Cartridge::from_bytes(rom_bytes)
@@ -140,14 +168,15 @@ fn run(args: Args) -> Result<(), String> {
             }
         }
     };
-    if let Some(a) = &audio {
+    if let Some(a) = audio.as_mut() {
         gb.set_sample_rate(a.sample_rate());
+        a.volume = cfg.volume;
     }
     let mut muted_channels: u8 = 0;
     let mut audio_scratch: Vec<f32> = Vec::new();
     let (w, h) = (
-        SCREEN_WIDTH as u32 * args.scale,
-        SCREEN_HEIGHT as u32 * args.scale,
+        SCREEN_WIDTH as u32 * cfg.scale,
+        SCREEN_HEIGHT as u32 * cfg.scale,
     );
     // Nearest-neighbour scaling (SDL hint "0"). Integer scale makes this crisp anyway.
     sdl2::hint::set("SDL_RENDER_SCALE_QUALITY", "0");
@@ -155,7 +184,7 @@ fn run(args: Args) -> Result<(), String> {
     window.position_centered().resizable();
     let window = window.build().map_err(|e| e.to_string())?;
     let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
-    if args.fullscreen {
+    if cfg.fullscreen {
         canvas
             .window_mut()
             .set_fullscreen(FullscreenType::Desktop)?;
@@ -171,7 +200,7 @@ fn run(args: Args) -> Result<(), String> {
     let mut events = sdl.event_pump()?;
 
     let mut pads: HashMap<u32, GameController> = HashMap::new();
-    let mut input = input::InputState::default();
+    let mut input = input::InputState::new(Bindings::new(&cfg));
     let mut fast_forward = false;
     let mut pacer = pacing::Pacer::new();
     let mut pixels = vec![0u8; SCREEN_WIDTH * SCREEN_HEIGHT * 4];
@@ -179,6 +208,7 @@ fn run(args: Args) -> Result<(), String> {
 
     'main: loop {
         // Events are polled once per frame; buttons are set before run_frame().
+        let mut actions: Vec<input::ActionEvent> = Vec::new();
         for event in events.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'main,
@@ -187,19 +217,7 @@ fn run(args: Args) -> Result<(), String> {
                     repeat: false,
                     ..
                 } => {
-                    if k == input::KEY_QUIT {
-                        break 'main;
-                    } else if k == input::KEY_FULLSCREEN {
-                        let win = canvas.window_mut();
-                        let next = if win.fullscreen_state() == FullscreenType::Off {
-                            FullscreenType::Desktop
-                        } else {
-                            FullscreenType::Off
-                        };
-                        win.set_fullscreen(next)?;
-                    } else if k == input::KEY_FAST_FORWARD {
-                        fast_forward = true;
-                    } else if let Some(ch) = input::mute_channel(k) {
+                    if let Some(ch) = input::mute_channel(k) {
                         muted_channels ^= 1 << ch;
                         gb.set_muted_channels(muted_channels);
                         let state = if muted_channels & (1 << ch) != 0 {
@@ -214,18 +232,12 @@ fn run(args: Args) -> Result<(), String> {
                             eprintln!("volume {:.0}%", a.volume * 100.0);
                         }
                     } else {
-                        input.key(k, true);
+                        actions.extend(input.key(k, true));
                     }
                 }
                 Event::KeyUp {
                     keycode: Some(k), ..
-                } => {
-                    if k == input::KEY_FAST_FORWARD {
-                        fast_forward = false;
-                    } else {
-                        input.key(k, false);
-                    }
-                }
+                } => actions.extend(input.key(k, false)),
                 Event::ControllerDeviceAdded { which, .. } => match controllers.open(which) {
                     Ok(pad) => {
                         eprintln!("gamepad connected: {}", pad.name());
@@ -236,16 +248,18 @@ fn run(args: Args) -> Result<(), String> {
                 Event::ControllerDeviceRemoved { which, .. } => {
                     if pads.remove(&which).is_some() {
                         eprintln!("gamepad disconnected");
-                        input.clear_pad();
+                        actions.extend(input.clear_pad());
                     }
                 }
                 Event::ControllerButtonDown { button, .. } => {
-                    input.pad_button(button, true, args.swap_ab)
+                    actions.extend(input.pad_button(button, true))
                 }
                 Event::ControllerButtonUp { button, .. } => {
-                    input.pad_button(button, false, args.swap_ab)
+                    actions.extend(input.pad_button(button, false))
                 }
-                Event::ControllerAxisMotion { axis, value, .. } => input.pad_axis(axis, value),
+                Event::ControllerAxisMotion { axis, value, .. } => {
+                    actions.extend(input.pad_axis(axis, value))
+                }
                 Event::Window {
                     win_event: WindowEvent::FocusLost,
                     ..
@@ -254,6 +268,23 @@ fn run(args: Args) -> Result<(), String> {
                     save.flush(&mut gb, true);
                 }
                 _ => {}
+            }
+        }
+
+        for (action, down) in actions {
+            match (action, down) {
+                (Action::Quit, true) => break 'main,
+                (Action::Fullscreen, true) => {
+                    let win = canvas.window_mut();
+                    let next = if win.fullscreen_state() == FullscreenType::Off {
+                        FullscreenType::Desktop
+                    } else {
+                        FullscreenType::Off
+                    };
+                    win.set_fullscreen(next)?;
+                }
+                (Action::FastForward, held) => fast_forward = held,
+                _ => {} // wired up in the controls task
             }
         }
 
@@ -288,10 +319,16 @@ fn run(args: Args) -> Result<(), String> {
             break;
         }
         // Audio-driven pacing when a device is open; otherwise the timer pacer.
+        // Fast-forward discards the audio and uses the timer pacer so a finite speed
+        // multiplier works (0 = uncapped).
         match audio.as_mut() {
-            Some(a) if fast_forward => a.discard(&mut gb, &mut audio_scratch),
+            Some(a) if fast_forward => {
+                a.discard(&mut gb, &mut audio_scratch);
+                pacer.wait_for_next_frame(cfg.fast_forward_speed);
+            }
             Some(a) => a.push_and_wait(&mut gb, &mut audio_scratch),
-            None => pacer.wait_for_next_frame(fast_forward),
+            None if fast_forward => pacer.wait_for_next_frame(cfg.fast_forward_speed),
+            None => pacer.wait_for_next_frame(1.0),
         }
     }
     if let Some(a) = &audio {
@@ -356,6 +393,21 @@ impl RecordingFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_line_overrides_the_config() {
+        let parse = |a: &[&str]| parse_args(a.iter().map(|s| s.to_string())).unwrap();
+        let mut cfg = Config::parse("scale = 6\nfullscreen = true\n").unwrap();
+        apply_cli(&mut cfg, &parse(&["x.gb"]));
+        assert_eq!(
+            (cfg.scale, cfg.fullscreen),
+            (6, true),
+            "config beats default"
+        );
+        apply_cli(&mut cfg, &parse(&["x.gb", "--scale", "2", "--swap-ab"]));
+        assert_eq!((cfg.scale, cfg.swap_ab), (2, true), "flag beats config");
+        assert!(parse_args(["x.gb", "--config"].map(String::from).into_iter()).is_err());
+    }
 
     #[test]
     fn record_option_is_parsed() {

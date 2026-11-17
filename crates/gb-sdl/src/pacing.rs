@@ -34,13 +34,15 @@ impl Pacer {
     }
 
     /// Block until the current frame's deadline, then schedule the next one.
-    /// `fast_forward` skips the wait (uncapped) and re-syncs the clock.
-    pub fn wait_for_next_frame(&mut self, fast_forward: bool) {
+    /// `speed` is a multiple of normal (2.0 = twice as fast); 0 or less means uncapped:
+    /// skip the wait and re-sync the clock.
+    pub fn wait_for_next_frame(&mut self, speed: f64) {
         let now = Instant::now();
-        if fast_forward {
+        if speed <= 0.0 {
             self.next = now + frame_duration();
             return;
         }
+        let frame = frame_duration().div_f64(speed);
         // Sleep most of the wait, spin the last 1 ms: sleep granularity is coarse.
         let spin = Duration::from_millis(1);
         if let Some(left) = self.next.checked_duration_since(now) {
@@ -51,7 +53,7 @@ impl Pacer {
                 std::hint::spin_loop();
             }
         }
-        self.next = Self::advance(self.next, Instant::now(), frame_duration());
+        self.next = Self::advance(self.next, Instant::now(), frame);
     }
 }
 
