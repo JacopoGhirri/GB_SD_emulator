@@ -35,10 +35,9 @@ that had not been copied yet.)
 From Konsole, in that folder: `./gb-sdl` opens the game list (section 11), or `./gb-sdl games/Pokemon_Red.gb`
 plays one game directly (its save then goes beside the ROM instead of into `saves/`).
 
-- Keyboard: arrows, Z = B, X = A, Enter = Start, Backspace/RShift = Select, F (hold) = fast-forward,
-  F11 = fullscreen, Esc = quit. Full list in section 10. (Tab is **no longer** fast-forward.)
-- Gamepad: D-pad and left stick = D-pad, Menu = Start, View = Select, R2 (hold) = fast-forward.
-  The Steam button is left to Steam.
+- Keyboard: arrows, Z = B, X = A, Enter = Start, Backspace/RShift = Select,
+  F11 = fullscreen, Esc = quit. Full list in section 10.
+- Gamepad: D-pad and left stick = D-pad, Menu = Start, View = Select. The Steam button is left to Steam.
 - **A/B mapping is by label (default):** Deck **A** = Game Boy **A**, Deck **B** = Game Boy **B**.
   That is not the Nintendo *physical* layout: on a Game Boy, A is the right-hand button and B the
   left-hand one, whereas on the Deck A is the lower button and B the right-hand one. Pass `--swap-ab`
@@ -112,7 +111,6 @@ A mistake in it stops the program with a message naming the line (see `gb_log.tx
 | Action | Keyboard | Gamepad (default) |
 |---|---|---|
 | D-pad / A / B / Start / Select | arrows / X / Z / Enter / Backspace or RShift | D-pad or left stick / Deck A / Deck B / Menu / View |
-| Fast-forward (hold) | F | R2 |
 | Slow motion (hold) | S | none |
 | Pause | P | none |
 | Reset (battery save is kept) | F10 | none |
@@ -121,7 +119,7 @@ A mistake in it stops the program with a message naming the line (see `gb_log.tx
 | Screenshot (PNG beside the ROM) | F12 | none |
 | Fullscreen / leave the game | F11 / Esc (list in folder mode, quit in direct mode) | Start+Select held 1.5 s = back to the list (folder mode) |
 
-Deliberately only fast-forward is on the pad by default: nothing destructive (load state,
+Deliberately nothing but the Game Boy buttons is on the pad by default: nothing destructive (load state,
 reset) sits on a button you can hit by accident. `pad.save_state = x` and so on in `config.ini` add more.
 
 ### Reaching the rest without a keyboard: Steam Input back buttons  [unconfirmed]
@@ -129,8 +127,7 @@ In Game Mode, open the shortcut's controller settings and bind the back grips to
 L4 = `F5` (quick save), R4 = `F8` (quick load), L5 = `P` (pause), R5 = `F6` (next slot). To quit, use
 Steam button, Exit game, or bind a grip to `Esc`. The emulator only sees keys, so it does not care how
 they got there. (SDL sees Steam's virtual gamepad, which has no back-grip buttons unless Steam Input maps
-them.) The trigger binding (R2) needs no setup: the "Gamepad With Joystick Trackpad" layout passes the
-triggers through as analogue axes and they count as pressed past about half travel.
+them.) The analogue triggers (L2/R2) are not used by the emulator.
 
 ### Save states: what to know
 - State files are `<rom>.state1` ... `.state9` beside the ROM (about 270 KB each) and are tied to that
@@ -164,8 +161,13 @@ in the game window with a built-in font, so there is nothing to install.
 - Not done: remembering the last game between launches (the cursor does stay on the same game while the
   program runs); doing so would need one more file.
 
-## 12. Rewind was tried and removed (2026-11-17)
-A rewind feature (hold L2 / R to step back through recent play) was built and tested in unit tests, but on
-the Deck pressing L2 did nothing, so it was removed at the owner's request. An old `config.ini` that still
-contains `rewind`, `rewind_seconds`, `rewind_interval_frames`, `key.rewind` or `pad.rewind` still loads:
-those lines are ignored. Quick save / quick load (section 10) remain.
+## 12. Rewind and fast-forward were tried and removed (2026-11-17)
+- **Rewind** (hold L2 / R to step back through recent play) was built and unit-tested, but on the Deck pressing
+  L2 did nothing, so it was removed at the owner's request.
+- **Fast-forward** (hold R2 / F) only muted the sound on the Deck without visibly speeding the game up, so it was
+  removed too (same request). Slow motion (S) is unchanged.
+- The cause of either failure was never found (by decision, not investigated). The analogue-trigger code
+  (R2/L2 as buttons) was removed with them.
+- An old `config.ini` that still contains `rewind`, `rewind_seconds`, `rewind_interval_frames`, `key.rewind`,
+  `pad.rewind`, `fast_forward_speed`, `key.fast_forward` or `pad.fast_forward` still loads: those lines are
+  ignored (a message is printed). Quick save / quick load (section 10) remain.

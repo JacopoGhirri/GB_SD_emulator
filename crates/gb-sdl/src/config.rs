@@ -10,23 +10,22 @@
 //! fullscreen = false
 //! swap_ab = false             # Nintendo layout on the gamepad (south = B)
 //! volume = 0.8                # 0.0 - 1.0
-//! fast_forward_speed = 0      # 0 = as fast as possible, otherwise a multiple (2 = double speed)
 //! slow_mo_speed = 0.25        # while the slow-motion key is held
 //! palette = grey              # DMG colours: grey green pocket mint (F9 cycles in game)
-//! key.fast_forward = F, Tab   # keyboard: comma-separated SDL key names
-//! pad.fast_forward = righttrigger
+//! key.slow_mo = S, Tab        # keyboard: comma-separated SDL key names
+//! pad.pause = x               # gamepad: SDL button names
 //! ```
-//! Bindable names: `right left up down a b start select quit fullscreen fast_forward slow_mo
+//! Bindable names: `right left up down a b start select quit fullscreen slow_mo
 //! pause reset screenshot save_state load_state next_slot next_palette`.
 //! A `key.NAME` / `pad.NAME` line *replaces* that control's default bindings.
 //! Pad names are SDL's: `a b x y back start leftshoulder rightshoulder dpup dpdown dpleft
-//! dpright leftstick rightstick lefttrigger righttrigger`.
+//! dpright leftstick rightstick`.
 
 use std::path::{Path, PathBuf};
 
 use crate::palette;
 use gb_core::Buttons;
-use sdl2::controller::{Axis, Button};
+use sdl2::controller::Button;
 use sdl2::keyboard::Keycode;
 
 /// Things the frontend can be asked to do (as opposed to Game Boy buttons).
@@ -34,8 +33,6 @@ use sdl2::keyboard::Keycode;
 pub enum Action {
     Quit,
     Fullscreen,
-    /// Held: runs at `fast_forward_speed` while pressed.
-    FastForward,
     /// Held: runs at `slow_mo_speed` while pressed.
     SlowMo,
     Pause,
@@ -56,13 +53,6 @@ pub enum Action {
 pub enum Target {
     Button(u8),
     Action(Action),
-}
-
-/// A gamepad input. Triggers are *axes* in SDL (not buttons), so they need their own variant.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum PadInput {
-    Button(Button),
-    Trigger(Axis),
 }
 
 /// One row per bindable control: config name, target, default keys, default pad inputs.
@@ -114,12 +104,6 @@ const CONTROLS: &[ControlRow] = &[
         &["F11"],
         &[],
     ),
-    (
-        "fast_forward",
-        Target::Action(Action::FastForward),
-        &["F"],
-        &["righttrigger"],
-    ),
     ("slow_mo", Target::Action(Action::SlowMo), &["S"], &[]),
     ("pause", Target::Action(Action::Pause), &["P"], &[]),
     ("reset", Target::Action(Action::Reset), &["F10"], &[]),
@@ -150,13 +134,17 @@ const CONTROLS: &[ControlRow] = &[
     ),
 ];
 
-/// Settings that existed once and are now ignored, so an old config.ini still loads.
+/// Settings of features that were removed (rewind, fast-forward) and are now ignored, so an old
+/// config.ini still loads and Game Mode never fails to start because of a leftover line.
 const REMOVED_SETTINGS: &[&str] = &[
     "rewind",
     "rewind_seconds",
     "rewind_interval_frames",
     "key.rewind",
     "pad.rewind",
+    "fast_forward_speed",
+    "key.fast_forward",
+    "pad.fast_forward",
 ];
 
 #[derive(Clone, Debug)]
@@ -165,14 +153,12 @@ pub struct Config {
     pub fullscreen: bool,
     pub swap_ab: bool,
     pub volume: f32,
-    /// Multiple of normal speed while fast-forward is held; 0 = uncapped.
-    pub fast_forward_speed: f64,
     /// Multiple of normal speed while slow-motion is held (0.1 to 1).
     pub slow_mo_speed: f64,
     /// Index into `palette::PALETTES` (DMG colour scheme).
     pub palette: usize,
     pub(crate) key_overrides: Vec<(&'static str, Vec<Keycode>)>,
-    pub(crate) pad_overrides: Vec<(&'static str, Vec<PadInput>)>,
+    pub(crate) pad_overrides: Vec<(&'static str, Vec<Button>)>,
 }
 
 impl Default for Config {
@@ -182,7 +168,6 @@ impl Default for Config {
             fullscreen: false,
             swap_ab: false,
             volume: 1.0,
-            fast_forward_speed: 0.0,
             slow_mo_speed: 0.25,
             palette: 0,
             key_overrides: Vec::new(),
@@ -215,7 +200,7 @@ impl Config {
             seen.push(key.clone());
             if REMOVED_SETTINGS.contains(&key.as_str()) {
                 eprintln!(
-                    "config: line {n}: `{key}` is no longer used (rewind was removed); ignored"
+                    "config: line {n}: `{key}` is no longer used (that feature was removed); ignored"
                 );
                 continue;
             }
@@ -247,13 +232,6 @@ impl Config {
                     .ok()
                     .filter(|v| (0.0..=1.0).contains(v))
                     .ok_or("volume must be a number from 0.0 to 1.0")?;
-            }
-            "fast_forward_speed" => {
-                self.fast_forward_speed = value
-                    .parse::<f64>()
-                    .ok()
-                    .filter(|v| *v == 0.0 || (1.0..=100.0).contains(v))
-                    .ok_or("fast_forward_speed must be 0 (uncapped) or from 1 to 100")?;
             }
             "palette" => {
                 self.palette = palette::by_name(value).ok_or_else(|| {
@@ -350,22 +328,16 @@ fn control(name: &str) -> Result<&'static ControlRow, String> {
     })
 }
 
-fn parse_pad(name: &str) -> Result<PadInput, String> {
-    let lower = name.to_ascii_lowercase();
-    if let Some(b) = Button::from_string(&lower) {
-        return Ok(PadInput::Button(b));
-    }
-    match Axis::from_string(&lower) {
-        Some(a @ (Axis::TriggerLeft | Axis::TriggerRight)) => Ok(PadInput::Trigger(a)),
-        _ => Err(format!("unknown gamepad input `{name}`")),
-    }
+fn parse_pad(name: &str) -> Result<Button, String> {
+    Button::from_string(&name.to_ascii_lowercase())
+        .ok_or_else(|| format!("unknown gamepad button `{name}`"))
 }
 
 /// The resolved key and pad tables used at run time.
 #[derive(Clone, Debug)]
 pub struct Bindings {
     pub keys: Vec<(Keycode, Target)>,
-    pub pads: Vec<(PadInput, Target)>,
+    pub pads: Vec<(Button, Target)>,
 }
 
 impl Bindings {
@@ -408,8 +380,11 @@ impl Bindings {
         self.keys.iter().find(|(k, _)| *k == key).map(|(_, t)| *t)
     }
 
-    pub fn pad(&self, input: PadInput) -> Option<Target> {
-        self.pads.iter().find(|(p, _)| *p == input).map(|(_, t)| *t)
+    pub fn pad(&self, button: Button) -> Option<Target> {
+        self.pads
+            .iter()
+            .find(|(p, _)| *p == button)
+            .map(|(_, t)| *t)
     }
 }
 
@@ -422,23 +397,23 @@ mod tests {
         let c = Config::parse("").unwrap();
         assert_eq!((c.scale, c.fullscreen, c.swap_ab), (4, false, false));
         assert_eq!(c.volume, 1.0);
-        assert_eq!(c.fast_forward_speed, 0.0);
+        assert_eq!(c.slow_mo_speed, 0.25);
     }
 
     #[test]
     fn values_comments_and_case() {
         let c = Config::parse(
-            "# a comment\n  Scale = 6  ; trailing\nfullscreen=YES\nvolume = 0.5\nfast_forward_speed = 4\n",
+            "# a comment\n  Scale = 6  ; trailing\nfullscreen=YES\nvolume = 0.5\nslow_mo_speed = 0.5\n",
         )
         .unwrap();
         assert_eq!((c.scale, c.fullscreen), (6, true));
-        assert_eq!((c.volume, c.fast_forward_speed), (0.5, 4.0));
+        assert_eq!((c.volume, c.slow_mo_speed), (0.5, 0.5));
     }
 
     #[test]
     fn every_bad_line_is_reported_with_its_number() {
         let errs = Config::parse(
-            "scale = 0\nbogus = 1\nvolume = loud\nno equals sign\nscale = 2\nkey.nothing = A\nfast_forward_speed = 0.5\n",
+            "scale = 0\nbogus = 1\nvolume = loud\nno equals sign\nscale = 2\nkey.nothing = A\nslow_mo_speed = 0.01\n",
         )
         .unwrap_err();
         let all = errs.join("\n");
@@ -448,7 +423,7 @@ mod tests {
         assert!(all.contains("line 4: expected `key = value`"), "{all}");
         assert!(all.contains("line 5: `scale` is set twice"), "{all}");
         assert!(all.contains("line 6: unknown control `nothing`"), "{all}");
-        assert!(all.contains("line 7: fast_forward_speed must be"), "{all}");
+        assert!(all.contains("line 7: slow_mo_speed must be"), "{all}");
         assert_eq!(errs.len(), 7);
     }
 
@@ -492,20 +467,28 @@ mod tests {
     /// Rewind was removed. A config.ini that still has its settings must keep working (a
     /// game launched from Game Mode would otherwise refuse to start), so they are ignored.
     #[test]
-    fn removed_rewind_settings_are_ignored_not_errors() {
+    fn removed_settings_are_ignored_not_errors() {
         let old_file = [
             "rewind = true",
             "rewind_seconds = 30",
             "rewind_interval_frames = 4",
             "key.rewind = R",
             "pad.rewind = lefttrigger",
+            "fast_forward_speed = 4",
+            "key.fast_forward = F, Tab",
+            "pad.fast_forward = righttrigger",
             "scale = 3",
         ];
         let c = Config::parse(&old_file.join("\n")).unwrap();
         assert_eq!(c.scale, 3, "other settings still apply");
         let b = Bindings::new(&c);
         assert_eq!(b.key(Keycode::R), None, "R does nothing now");
-        assert_eq!(b.pad(PadInput::Trigger(Axis::TriggerLeft)), None);
+        assert_eq!(b.key(Keycode::F), None, "F does nothing now");
+        assert_eq!(
+            b.key(Keycode::Tab),
+            None,
+            "an old `key.fast_forward = Tab` is ignored"
+        );
         assert!(
             Config::parse("rewindd = 1").is_err(),
             "typos are still errors"
@@ -558,12 +541,8 @@ scale = 4"
             (d.scale, d.fullscreen, d.swap_ab, d.palette)
         );
         assert_eq!(
-            (
-                parsed.volume,
-                parsed.fast_forward_speed,
-                parsed.slow_mo_speed
-            ),
-            (d.volume, d.fast_forward_speed, d.slow_mo_speed)
+            (parsed.volume, parsed.slow_mo_speed),
+            (d.volume, d.slow_mo_speed)
         );
         let (bp, bd) = (Bindings::new(&parsed), Bindings::new(&d));
         assert_eq!(bp.keys, bd.keys, "key defaults in the template differ");
@@ -582,7 +561,7 @@ scale = 4"
             "scale = -1",
             "volume = 1.5",
             "volume = nan",
-            "fast_forward_speed = inf",
+            "slow_mo_speed = inf",
         ] {
             assert!(Config::parse(bad).is_err(), "{bad}");
         }
@@ -598,12 +577,7 @@ scale = 4"
             Some(Target::Button(Buttons::SELECT))
         );
         assert_eq!(b.key(Keycode::Escape), Some(Target::Action(Action::Quit)));
-        assert_eq!(b.key(Keycode::F), Some(Target::Action(Action::FastForward)));
-        assert_eq!(b.key(Keycode::Tab), None, "Tab is no longer fast-forward");
-        assert_eq!(
-            b.pad(PadInput::Trigger(Axis::TriggerRight)),
-            Some(Target::Action(Action::FastForward))
-        );
+        assert_eq!(b.key(Keycode::S), Some(Target::Action(Action::SlowMo)));
         // Every built-in name must parse, or the default would silently vanish.
         let keys: usize = CONTROLS.iter().map(|c| c.2.len()).sum();
         let pads: usize = CONTROLS.iter().map(|c| c.3.len()).sum();
@@ -613,49 +587,40 @@ scale = 4"
     #[test]
     fn swap_ab_trades_the_face_button_defaults() {
         let plain = Bindings::new(&Config::default());
-        assert_eq!(
-            plain.pad(PadInput::Button(Button::B)),
-            Some(Target::Button(Buttons::B))
-        );
-        assert_eq!(
-            plain.pad(PadInput::Button(Button::A)),
-            Some(Target::Button(Buttons::A))
-        );
+        assert_eq!(plain.pad(Button::B), Some(Target::Button(Buttons::B)));
+        assert_eq!(plain.pad(Button::A), Some(Target::Button(Buttons::A)));
         let swapped_cfg = Config {
             swap_ab: true,
             ..Config::default()
         };
         let swapped = Bindings::new(&swapped_cfg);
-        assert_eq!(
-            swapped.pad(PadInput::Button(Button::B)),
-            Some(Target::Button(Buttons::A))
-        );
-        assert_eq!(
-            swapped.pad(PadInput::Button(Button::A)),
-            Some(Target::Button(Buttons::B))
-        );
+        assert_eq!(swapped.pad(Button::B), Some(Target::Button(Buttons::A)));
+        assert_eq!(swapped.pad(Button::A), Some(Target::Button(Buttons::B)));
     }
 
     #[test]
     fn overrides_replace_the_defaults() {
         let c = Config::parse(
-            "key.fast_forward = Tab, Q\npad.fast_forward = rightshoulder\nkey.quit = \n",
+            r"key.slow_mo = Tab, Q
+pad.slow_mo = rightshoulder
+key.quit = 
+",
         );
         // `key.quit =` with no key names is an error: it would leave no way to quit by key.
         assert!(c.is_err());
-        let c =
-            Config::parse("key.fast_forward = Tab, Q\npad.fast_forward = rightshoulder\n").unwrap();
+        let c = Config::parse(
+            r"key.slow_mo = Tab, Q
+pad.slow_mo = rightshoulder
+",
+        )
+        .unwrap();
         let b = Bindings::new(&c);
+        assert_eq!(b.key(Keycode::Tab), Some(Target::Action(Action::SlowMo)));
+        assert_eq!(b.key(Keycode::Q), Some(Target::Action(Action::SlowMo)));
+        assert_eq!(b.key(Keycode::S), None, "the default key is replaced");
         assert_eq!(
-            b.key(Keycode::Tab),
-            Some(Target::Action(Action::FastForward))
-        );
-        assert_eq!(b.key(Keycode::Q), Some(Target::Action(Action::FastForward)));
-        assert_eq!(b.key(Keycode::F), None);
-        assert_eq!(b.pad(PadInput::Trigger(Axis::TriggerRight)), None);
-        assert_eq!(
-            b.pad(PadInput::Button(Button::RightShoulder)),
-            Some(Target::Action(Action::FastForward))
+            b.pad(Button::RightShoulder),
+            Some(Target::Action(Action::SlowMo))
         );
     }
 
@@ -667,7 +632,11 @@ scale = 4"
             Config::parse("pad.a = leftx").is_err(),
             "a stick axis is not a button"
         );
-        assert!(Config::parse("pad.a = lefttrigger").is_ok());
+        assert!(
+            Config::parse("pad.a = lefttrigger").is_err(),
+            "triggers are not supported"
+        );
+        assert!(Config::parse("pad.pause = x").is_ok());
     }
 
     #[test]

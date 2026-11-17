@@ -106,7 +106,6 @@ fn game_loop(
 ) -> Result<Exit, String> {
     let cfg = fe.cfg.clone();
     let mut input = input::InputState::new(Bindings::new(&cfg));
-    let mut fast_forward = false;
     let mut slow_mo = false;
     let mut paused = false;
     let mut slot: u8 = 1;
@@ -165,9 +164,7 @@ fn game_loop(
                 Event::ControllerButtonUp { button, .. } => {
                     actions.extend(input.pad_button(button, false))
                 }
-                Event::ControllerAxisMotion { axis, value, .. } => {
-                    actions.extend(input.pad_axis(axis, value))
-                }
+                Event::ControllerAxisMotion { axis, value, .. } => input.pad_axis(axis, value),
                 Event::Window {
                     win_event: WindowEvent::FocusLost,
                     ..
@@ -195,7 +192,6 @@ fn game_loop(
             match (action, down) {
                 (Action::Quit, true) => return Ok(leave),
                 (Action::Fullscreen, true) => fe.toggle_fullscreen()?,
-                (Action::FastForward, held) => fast_forward = held,
                 (Action::SlowMo, held) => slow_mo = held,
                 (Action::Pause, true) => {
                     paused = !paused;
@@ -313,11 +309,9 @@ fn game_loop(
             return Ok(Exit::Quit);
         }
         // Audio-driven pacing at normal speed when a device is open; otherwise (and while
-        // paused, fast-forwarding or in slow motion) the timer pacer. Non-normal speeds
+        // paused or in slow motion) the timer pacer. Non-normal speeds
         // discard the audio instead of playing it at the wrong pitch.
-        let speed = if fast_forward {
-            Some(cfg.fast_forward_speed)
-        } else if slow_mo {
+        let speed = if slow_mo {
             Some(cfg.slow_mo_speed)
         } else if paused || fe.audio.is_none() {
             Some(1.0)

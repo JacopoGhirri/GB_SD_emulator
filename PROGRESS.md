@@ -630,6 +630,14 @@ $ scripts/package_deck.sh -> release/gb-sdl-deck.tar.gz (328K) with gb-sdl, run.
 ```
 
 - [x] Task 7 REVERTED (2026-11-17, owner decision): rewind removed. On the Deck, with `rewind = true`, L2 did nothing (R2 fast-forward worked), so the owner asked to drop the feature. Removed: `rewind.rs`, the `rewind*` config keys, `Action::Rewind` and its R / L2 bindings, the game-loop code, docs, package README, and the rewind tests. Old config files that still contain the rewind settings load fine: those keys are ignored with a warning (`REMOVED_SETTINGS` in `config.rs`, covered by a test) so Game Mode never fails to start because of a leftover line. Save states (task 3/5) are unaffected. Cause of the L2 failure was never found (not investigated, by decision); the trigger-axis code is shared with R2, which works.
+- [x] Fast-forward REMOVED too (2026-11-17, owner decision, after rewind): on the Deck R2 only muted the sound (no visible speed-up) and L2 rewind did nothing. Removed `Action::FastForward`, `fast_forward_speed`, the F / R2 bindings and the whole analogue-trigger path (`PadInput`, trigger edge tracking, `TRIGGER_THRESHOLD`); the pad now only maps buttons and the left stick. `fast_forward_speed`, `key.fast_forward`, `pad.fast_forward` join the ignored-with-a-message list (`REMOVED_SETTINGS`) so an old config.ini still loads. Slow motion (S) kept. Causes of the R2 / L2 failures were not investigated (owner chose removal). Docs, template and package README updated.
+  - Housekeeping: the working tree had been put back to the pre-removal versions of `config.rs`, `game.rs`, `main.rs`, `config.example.ini` and `rewind.rs` after commit `8407f3d` (rewind removal) had been made. They were byte-identical to `87dae8a`, so I restored them to HEAD (`git checkout HEAD -- ...`, nothing lost) before removing fast-forward.
+```
+$ cargo fmt --all -- --check -> clean;  cargo clippy --workspace --all-targets -- -D warnings -> clean
+$ cargo test --workspace (WSL) -> every suite ok, 0 failed (gb-core 164, save_state 18, pokemon_local 2, gb-sdl 75)
+$ scripts/package_deck.sh -> release/gb-sdl-deck.tar.gz (320K)
+```
+
 ### Next (resume here)
 1. (DONE 2026-11-17, 268 passed / 0 failed) Run `scripts/run_all_tests.sh` in WSL (`CARGO_TARGET_DIR=~/gb-target`), confirm 0 failed (watch for the 17th save_state test), update the `docs/ACCURACY.md` table (it now includes `save_state`). If anything fails, fix before starting task 4.
 2. (Tasks 4-6, 8, 8b done; rewind removed; the owner Deck test passed except rewind.) Next: 9 perf, 10-13 docs/CI/review/robustness test.

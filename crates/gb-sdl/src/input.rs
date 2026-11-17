@@ -1,7 +1,7 @@
 //! Input mapping: keyboard and gamepad -> Game Boy buttons. Pure functions over bit masks
 //! so they can be unit-tested without SDL devices.
 
-use crate::config::{Action, Bindings, PadInput, Target};
+use crate::config::{Action, Bindings, Target};
 use gb_core::Buttons;
 use sdl2::controller::{Axis, Button};
 use sdl2::keyboard::Keycode;
@@ -28,8 +28,6 @@ pub fn volume_key(key: Keycode) -> Option<bool> {
 
 /// Left stick dead zone (of 32767).
 pub const STICK_DEADZONE: i16 = 12_000;
-/// Triggers are analogue axes (0..=32767); count them as pressed past about half travel.
-pub const TRIGGER_THRESHOLD: i16 = 16_000;
 
 /// Left stick -> D-pad bits (SDL y axis is positive downwards).
 pub fn stick_bits(x: i16, y: i16) -> u8 {
@@ -60,7 +58,7 @@ pub fn filter_opposites(bits: u8) -> u8 {
     b
 }
 
-/// An action key/button/trigger went down (`true`) or up (`false`).
+/// An action key/button went down (`true`) or up (`false`).
 pub type ActionEvent = (Action, bool);
 
 /// Held-input state, combined into one `Buttons` per frame.
@@ -70,8 +68,6 @@ pub struct InputState {
     pad_buttons: u8,
     stick_x: i16,
     stick_y: i16,
-    /// Which analogue triggers are currently past the threshold: [left, right].
-    triggers: [bool; 2],
     /// Pad inputs currently holding an action down, so unplugging can release them.
     held_pad_actions: Vec<Action>,
 }
@@ -84,7 +80,6 @@ impl InputState {
             pad_buttons: 0,
             stick_x: 0,
             stick_y: 0,
-            triggers: [false; 2],
             held_pad_actions: Vec::new(),
         }
     }
@@ -100,11 +95,7 @@ impl InputState {
     }
 
     pub fn pad_button(&mut self, button: Button, down: bool) -> Option<ActionEvent> {
-        self.pad_input(PadInput::Button(button), down)
-    }
-
-    fn pad_input(&mut self, input: PadInput, down: bool) -> Option<ActionEvent> {
-        match self.bindings.pad(input)? {
+        match self.bindings.pad(button)? {
             Target::Button(mask) => {
                 set(&mut self.pad_buttons, mask, down);
                 None
@@ -119,31 +110,21 @@ impl InputState {
         }
     }
 
-    pub fn pad_axis(&mut self, axis: Axis, value: i16) -> Option<ActionEvent> {
+    /// The left stick acts as a second D-pad; other axes (triggers, right stick) are ignored.
+    pub fn pad_axis(&mut self, axis: Axis, value: i16) {
         match axis {
             Axis::LeftX => self.stick_x = value,
             Axis::LeftY => self.stick_y = value,
-            Axis::TriggerLeft | Axis::TriggerRight => {
-                let i = usize::from(axis == Axis::TriggerRight);
-                let down = value > TRIGGER_THRESHOLD;
-                // Report only the edges, not every axis event.
-                if self.triggers[i] != down {
-                    self.triggers[i] = down;
-                    return self.pad_input(PadInput::Trigger(axis), down);
-                }
-            }
             _ => {}
         }
-        None
     }
 
     /// Forget gamepad state (controller unplugged) so no button stays stuck. Returns release
-    /// events for any frontend action (e.g. fast-forward on a trigger) that was held.
+    /// events for any frontend action (e.g. slow motion on a pad button) that was held.
     pub fn clear_pad(&mut self) -> Vec<ActionEvent> {
         self.pad_buttons = 0;
         self.stick_x = 0;
         self.stick_y = 0;
-        self.triggers = [false; 2];
         self.held_pad_actions
             .drain(..)
             .map(|a| (a, false))
@@ -182,12 +163,13 @@ mod tests {
         assert_eq!(s.buttons().0, Buttons::B);
         assert_eq!(s.key(Keycode::Z, false), None);
         assert_eq!(s.key(Keycode::Q, true), None, "unbound key");
-        assert_eq!(s.key(Keycode::F, true), Some((Action::FastForward, true)));
-        assert_eq!(s.key(Keycode::F, false), Some((Action::FastForward, false)));
+        assert_eq!(s.key(Keycode::S, true), Some((Action::SlowMo, true)));
+        assert_eq!(s.key(Keycode::S, false), Some((Action::SlowMo, false)));
+        assert_eq!(s.key(Keycode::F, true), None, "F is not bound to anything");
         assert_eq!(
             s.key(Keycode::Tab, true),
             None,
-            "Tab is no longer fast-forward"
+            "Tab is not bound to anything"
         );
         assert_eq!(s.key(Keycode::Escape, true), Some((Action::Quit, true)));
     }
@@ -240,34 +222,23 @@ mod tests {
     }
 
     #[test]
-    fn right_trigger_is_fast_forward_and_reports_only_edges() {
+    fn the_left_stick_moves_the_dpad_and_triggers_do_nothing() {
         let mut s = state(&Config::default());
-        assert_eq!(
-            s.pad_axis(Axis::TriggerRight, 5_000),
-            None,
-            "below threshold"
-        );
-        assert_eq!(
-            s.pad_axis(Axis::TriggerRight, 30_000),
-            Some((Action::FastForward, true))
-        );
-        assert_eq!(s.pad_axis(Axis::TriggerRight, 32_000), None, "still held");
-        assert_eq!(
-            s.pad_axis(Axis::TriggerRight, 0),
-            Some((Action::FastForward, false))
-        );
-        assert_eq!(
-            s.pad_axis(Axis::TriggerLeft, 32_000),
-            None,
-            "left trigger is not bound"
-        );
+        s.pad_axis(Axis::LeftX, 30_000);
+        s.pad_axis(Axis::TriggerRight, 32_000);
+        s.pad_axis(Axis::TriggerLeft, 32_000);
+        assert_eq!(s.buttons().0, Buttons::RIGHT);
+        s.pad_axis(Axis::LeftX, 0);
+        assert_eq!(s.buttons().0, 0);
     }
 
     #[test]
-    fn unplugging_releases_a_held_trigger_action() {
-        let mut s = state(&Config::default());
-        s.pad_axis(Axis::TriggerRight, 30_000);
-        assert_eq!(s.clear_pad(), vec![(Action::FastForward, false)]);
+    fn unplugging_releases_a_held_pad_action() {
+        // Slow motion bound to a pad button (not a default) must not stay stuck on unplug.
+        let cfg = Config::parse("pad.slow_mo = x").unwrap();
+        let mut s = state(&cfg);
+        assert_eq!(s.pad_button(Button::X, true), Some((Action::SlowMo, true)));
+        assert_eq!(s.clear_pad(), vec![(Action::SlowMo, false)]);
         assert!(s.clear_pad().is_empty());
     }
 }

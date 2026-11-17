@@ -134,7 +134,7 @@ impl Audio {
         self.stats.sum_queued += q as u64;
     }
 
-    /// Fast-forward: throw the audio away and empty the queue so it does not play late.
+    /// Slow motion or pause: throw the audio away and empty the queue so it does not play late.
     pub fn discard(&mut self, gb: &mut GameBoy, scratch: &mut Vec<f32>) {
         scratch.clear();
         gb.drain_audio(scratch);
